@@ -1,0 +1,7 @@
+example_models/*
+
+*.pkl
+*.svg
+*.ipynb
+
+__pycache__/*
