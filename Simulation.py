@@ -23,8 +23,10 @@ from underactuated import running_as_notebook, ManipulatorDynamics
 
 ## used 
 from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
-from pydrake.systems.framework import DiagramBuilder
 from pydrake.multibody.parsing import Parser
+
+from pydrake.systems.framework import DiagramBuilder
+from pydrake.systems.controllers import FiniteHorizonLinearQuadraticRegulatorOptions, MakeFiniteHorizonLinearQuadraticRegulator
 # from underactuated import ConfigureParser
 
 from pydrake.examples import QuadrotorPlant, QuadrotorGeometry, StabilizingLQRController
@@ -36,14 +38,22 @@ import IrisUtils as irisUtils
 from pydrake.all import (
     Simulator,
     BodyIndex, 
-    ModelInstanceIndex,
-    LinearQuadraticRegulator   
+    ModelInstanceIndex
 )
 
 
 from IPython.display import SVG, display
 import pydot
 import cairosvg ##To save the svg file
+
+import PerchingPlane as pp
+
+
+FIXED_WING = 0
+QUADROTOR = 1
+PERCHING_PLANE = 2
+
+PLANT_TYPE = PERCHING_PLANE
 
 
 class SimulationEnvironment():
@@ -83,26 +93,90 @@ class SimulationEnvironment():
     
     
     def add_fixed_wing(self):
-        m = 0.775
-        arm_length = 0.15
-        inertia = np.diag([0.0015, 0.0025, 0.0035])
-        k_f = 1.0
-        k_m = 0.0245   
-        self.quad_plant = self.builder.AddSystem(QuadrotorPlant(m, arm_length, inertia, k_f ,k_m))
-        self.quad_plant.set_name("quadrotor")
-        QuadrotorGeometry.AddToBuilder(self.builder, self.quad_plant.get_output_port(0), self.scene_graph)
+        if PLANT_TYPE == QUADROTOR:
+            m = 0.775
+            arm_length = 0.15
+            inertia = np.diag([0.0015, 0.0025, 0.0035])
+            k_f = 1.0
+            k_m = 0.0245   
+            self.quad_plant = self.builder.AddSystem(QuadrotorPlant(m, arm_length, inertia, k_f ,k_m))
+            self.quad_plant.set_name("quadrotor")
+            QuadrotorGeometry.AddToBuilder(self.builder, self.quad_plant.get_output_port(0), self.scene_graph)
+            return
+        
+        elif PLANT_TYPE == PERCHING_PLANE:
+            
+            self.perching_plane = self.builder.AddSystem(pp.GliderPlant())
+            pp.GliderGeometry.AddToBuilder(self.builder, self.perching_plane.GetOutputPort("state"), self.scene_graph)
+            self.perching_plane.set_name("perching_plane")
+            return
+            
+        elif PLANT_TYPE == FIXED_WING:
+            return
+        
+        raise ValueError("Invalid plant type")
     
-    def add_controller(self, point):
-        controller = self.builder.AddSystem(StabilizingLQRController(self.quad_plant, point))
-        self.builder.Connect(controller.get_output_port(0), self.quad_plant.get_input_port(0))
-        self.builder.Connect(self.quad_plant.get_output_port(0), controller.get_input_port(0))
+    def add_controller(self, point=None):
+        
+        if PLANT_TYPE == QUADROTOR:
+            if point is None:
+                point = [0, 0, 1]
+            controller = self.builder.AddSystem(StabilizingLQRController(self.quad_plant, point))
+            self.builder.Connect(controller.get_output_port(0), self.quad_plant.get_input_port(0))
+            self.builder.Connect(self.quad_plant.get_output_port(0), controller.get_input_port(0))
+            return
+        
+        elif PLANT_TYPE == PERCHING_PLANE:
+            
+            self.x_traj , self.u_traj = pp.dircol_perching()
+            
+            Q = np.diag([10, 10, 10, 1, 1, 1, 1])
+            R = [0.1]
+            options = FiniteHorizonLinearQuadraticRegulatorOptions()
+            options.Qf = np.diag(
+                [
+                    (1 / 0.05) ** 2,
+                    (1 / 0.05) ** 2,
+                    (1 / 3.0) ** 2,
+                    (1 / 3.0) ** 2,
+                    1,
+                    1,
+                    (1 / 3.0) ** 2,
+                ]
+            )
+            # options.use_square_root_method = True  # Pending drake PR #16812
+            options.x0 = self.x_traj
+            options.u0 = self.u_traj
+
+            controller = self.builder.AddSystem(
+                MakeFiniteHorizonLinearQuadraticRegulator(
+                    system=self.perching_plane,
+                    context=self.perching_plane.CreateDefaultContext(),
+                    t0=self.x_traj.start_time(),
+                    tf=self.x_traj.end_time(),
+                    Q=Q,
+                    R=R,
+                    options=options,
+                )
+            )
+            self.builder.Connect(controller.get_output_port(), self.perching_plane.get_input_port())
+            self.builder.Connect(self.perching_plane.GetOutputPort("state"), controller.get_input_port())
+            
+            return
+            
+        elif PLANT_TYPE == FIXED_WING:
+            return
+        
+        raise ValueError("Invalid plant type")
+        
         
         
     
     def connect_meshcat(self):
         self.meshcat = pyGeo.StartMeshcat()
-        meshvis  = pyGeo.MeshcatVisualizer.AddToBuilder(self.builder, self.scene_graph, self.meshcat)
-        meshvis.set_name("obstacle_UAV_visualizer")
+        self.visualizer = pyGeo.MeshcatVisualizer.AddToBuilder(self.builder, self.scene_graph, self.meshcat)
+        self.visualizer.set_name("obstacle_UAV_visualizer")
+
         return
     
     def build_model(self):
@@ -164,22 +238,51 @@ class SimulationEnvironment():
         simulator = Simulator(self.diagram)
         simulator.set_target_realtime_rate(1.0)
         simulator_context = simulator.get_mutable_context()
-
-        fixed_wing_context = self.diagram.GetMutableSubsystemContext(self.quad_plant, simulator_context)
         
         
-        # Simulate
-        for i in range(5):
-            simulator_context.SetTime(0.0)
-            fixed_wing_context.SetContinuousState(
-                0.5
-                * np.random.randn(
-                    12,
+        if PLANT_TYPE == QUADROTOR:
+            fixed_wing_context = self.diagram.GetMutableSubsystemContext(self.quad_plant, simulator_context)
+        
+            # Simulate
+            for _ in range(5):
+                simulator_context.SetTime(0.0)
+                fixed_wing_context.SetContinuousState(
+                    0.5
+                    * np.random.randn(
+                        12,
+                    )
                 )
-            )
-            simulator.Initialize()
-            simulator.AdvanceTo(time)
-    
+                simulator.Initialize()
+                
+                self.visualizer.StartRecording()
+                simulator.AdvanceTo(time)
+                self.visualizer.StopRecording()
+                self.visualizer.PublishRecording()
+                return
+            
+        elif PLANT_TYPE == PERCHING_PLANE:
+            
+            perching_plane_context = self.diagram.GetMutableSubsystemContext(self.perching_plane, simulator_context)
+            rng = np.random.default_rng(123)
+            
+            for _ in range(10):
+                simulator_context.SetTime(self.x_traj.start_time())
+                initial_state = pp.GliderState(self.x_traj.value(self.x_traj.start_time()))
+                initial_state.z += 0.04 * rng.standard_normal()
+                perching_plane_context.SetContinuousState(initial_state[:])
+
+                simulator.Initialize()
+                self.visualizer.StartRecording()
+                simulator.AdvanceTo(self.x_traj.end_time())
+                self.visualizer.StopRecording()
+                self.visualizer.PublishRecording()
+                
+                return
+            
+        elif PLANT_TYPE == FIXED_WING:
+            return
+        
+        raise ValueError("Invalid plant type")
 
 
 ######################## PLANT UTILS ############################
@@ -206,7 +309,7 @@ def print_model_instances(plant):
     print()
     
 
-######################## IRIS UTILS ############################
+######################## direcol_perching UTILS ############################
 
 
         

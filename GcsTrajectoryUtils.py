@@ -6,7 +6,7 @@ import time
 
 from pydrake.solvers import MosekSolver
 
-# remember to export pythonpath: xport PYTHONPATH=$PYTHONPATH:/home/steve/drake_ws/underactuated/gcs-science-robotics
+# remember to export pythonpath: export PYTHONPATH=$PYTHONPATH:/home/steve/drake_ws/underactuated/gcs-science-robotics
 import gcs.bezier as gcb
 import pickle
 
@@ -100,7 +100,7 @@ class GCSTrajectory():
         geoUtils.visualize_point(meshcat,
                               goal,
                               label="Gcs/goal",
-                              radius=0.05, 
+                              radius=0.1, 
                               color=[1, 0, 0, 1], #red
                               visible=is_visible)
         
