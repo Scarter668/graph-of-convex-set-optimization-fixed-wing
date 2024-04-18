@@ -6,10 +6,7 @@ import numpy as np
 
 from pydrake.solvers import MosekSolver
 
-import gcs.bezier
-
-import GeometryUtils as geoUtils
-
+import time
 
 PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation.urdf"
 
@@ -49,9 +46,10 @@ if __name__ == "__main__":
     print("################ Starting IRIS region computation ################\n")
     irisWrapper = irisUtils.IrisWrapper()    
     simEnv.compute_obstacles(irisWrapper)
-    irisWrapper.add_meshVisualization_iris_obstacles(simEnv.meshcat, is_visible=True)
     irisWrapper.determine_and_set_domain(center_ground_xy, ground_width, ground_length, obst_height)    
-    irisWrapper.add_meshVisualization_iris_domain(simEnv.meshcat, is_visible=True)
+    
+    # irisWrapper.add_meshVisualization_iris_obstacles(simEnv.meshcat, is_visible=True)
+    # irisWrapper.add_meshVisualization_iris_domain(simEnv.meshcat, is_visible=True)
     
     
     if irisWrapper.load_regions_from_file() is None:
@@ -115,13 +113,27 @@ if __name__ == "__main__":
     simulator.save_and_display_diagram()
     
     
+    sim.print_model_instances(simulator.plant)
+
+    # Visualization
     irisWrapper.add_meshVisualization_iris_regions(simulator.meshcat, is_visible=False) 
     gcsTraj.visualize_start_goal(start, goal, simulator.meshcat)
     gcsTraj.visualize_trajectory(simulator.meshcat, num_points)
+    irisWrapper.add_meshVisualization_iris_obstacles(simulator.meshcat, is_visible=False)
+    irisWrapper.add_meshVisualization_iris_domain(simulator.meshcat, is_visible=True)
+
+    simulator.simulate(5)
+    
+    
+    # s0 = pp.GliderState(np.zeros(7))
+    # s0.x = -3.5
+    # s0.z = 0.1
+    # s0.xdot = 7.0
+    
+    # pp.draw_glider(s0[:], simulator.meshcat )
+    
 
     
-    simulator.simulate(5)
-
     print("################ FINISHED Simulation ################\n\n")
     
     
