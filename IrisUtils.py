@@ -1,12 +1,29 @@
 import pydrake.geometry.optimization as pyOpt
+import pydrake.geometry as pyGeo
 import numpy as np
 import GeometryUtils as geoUtils
 import time 
 import pickle
 
 from pydrake.common import RandomGenerator
+import irisCliqueCover as isc
 
-REGION_FILE_PATH = "iris_regions.pkl"
+REGION_FILE_PATH = "iris_regions"
+
+class IrisWrapperOptions:
+    use_CliqueCover = False
+    num_regions = 15
+    obstacle_scale_factor = 1.05
+    seed = 0
+    region_file_path = REGION_FILE_PATH
+    
+    clique_num_points = 500
+    
+    def __init__(self):
+        return
+    
+    
+
 
 class IrisWrapper:
 
@@ -17,9 +34,24 @@ class IrisWrapper:
     upper_bound = None
     
     iris_regions = []
+    
+    use_CliqueCover = False
+    
+    samples = None 
+    cliques = None
+    
+    
+    
         
-    def __init__(self):
-        pass
+    def __init__(self, options=IrisWrapperOptions()):
+
+        self.use_CliqueCover = options.use_CliqueCover
+        self.num_regions = options.num_regions
+        self.obstacle_scale_factor = options.obstacle_scale_factor
+        self.region_file_path = options.region_file_path
+        self.randomGen = RandomGenerator(options.seed)
+        self.num_points = options.clique_num_points
+        return
     
     def determine_and_set_domain(self, center_ground_xy, 
                                  ground_width, ground_length,
@@ -45,34 +77,70 @@ class IrisWrapper:
 
         return self.iris_obstacles
     
-    def solveIRIS_with_num_regions(self, num_regions=15,  obstacle_scale_factor=1.05, seed=0):
+    def solveIRIS(self):
         
-        iris_obstacles_scaled = [obstacle.Scale(obstacle_scale_factor) for obstacle in self.iris_obstacles]
+        iris_obstacles_scaled = [obstacle.Scale(self.obstacle_scale_factor) for obstacle in self.iris_obstacles]
         
         if self.iris_obstacles is None:
             raise ValueError("No obstacles to solve IRIS")
         if self.domain is None:
             raise ValueError("No domain to solve IRIS")
         
-        self.randomGen = RandomGenerator(seed)
+        
+        
+        
+        
         options = pyOpt.IrisOptions()
         options.require_sample_point_is_contained = True
         
-
         start_time = time.perf_counter()
         temp_time = start_time
+
         
-        prev_sample = None
-        for _ in range(num_regions):
-            sample = self.find_samplepoint_rand(prev_sample)
-            region = pyOpt.Iris(iris_obstacles_scaled, sample ,self.domain, options)
-            self.iris_regions.append(region)
+        if self.use_CliqueCover:
             
+            self.samples = self.find_NSamplePoints(self.num_points)
+            print(f"\nComputing minimal clique partition with {self.num_points} points\n")
             
-            t = time.perf_counter()
-            print(f"Region {len(self.iris_regions): .1f} computed in {t - temp_time} seconds\n")
-            temp_time = t
+            adj_mat = isc.vgraph(self.samples, self.iris_obstacles)
+            self.cliques = isc.compute_minimal_clique_partition_nx(adj_mat)
             
+            print("\nCalculating ellipsoids for cliques\n")
+            cliquepts = [self.samples[cl] for cl in self.cliques]
+            ells = []
+            for clpt in cliquepts:
+                try:
+                    ells.append(pyOpt.Hyperellipsoid.MinimumVolumeCircumscribedEllipsoid(clpt.T))
+                
+                except Exception as e:
+                    print(f"Failed to compute ellipsoid for clique {clpt}")
+                    print(f"Error: {e}")
+                    continue    
+            
+            print("\nSolving IRIS regions\n")
+            self.iris_regions = []
+            for e in ells:
+                seed = e.center()
+                options.require_sample_point_is_contained = True
+                options.starting_ellipse = e
+                # options.random_seed = seed
+                
+                r = pyOpt.Iris(iris_obstacles_scaled, seed, self.domain, options)
+                self.iris_regions.append(r)
+    
+        else:       
+            
+            prev_sample = None
+            for _ in range(self.num_regions):
+                sample = self.find_samplepoint_rand(prev_sample)
+                region = pyOpt.Iris(iris_obstacles_scaled, sample ,self.domain, options)
+                self.iris_regions.append(region)
+                
+                
+                t = time.perf_counter()
+                print(f"Region {len(self.iris_regions): .1f} computed in {t - temp_time} seconds\n")
+                temp_time = t
+                
         
         end_time = time.perf_counter()
         print(f"IRIS computation took {end_time - start_time: .1f} seconds")
@@ -83,11 +151,11 @@ class IrisWrapper:
     def add_meshVisualization_iris_obstacles(self, meshcat, is_visible=False):
         if meshcat is None:
             return
-        
+            
         i = 0
         for hpolyhydron in self.iris_obstacles:
             vertices = pyOpt.VPolytope(hpolyhydron).vertices()
-            geoUtils.visualizeToMesh_3D_convex_hull(meshcat, vertices, label=f"iris/obstacles/obstacle_{i}", visible=is_visible, fill=True, color=[0.3, 0.3, 0.3, .5])
+            geoUtils.visualizeToMesh_3D_convex_hull(meshcat, vertices, label=f"iris/obstacles/obstacle_{i}", visible=is_visible, fill=True, color=pyGeo.Rgba(0.3, 0.3, 0.3, .5))
             geoUtils.set_intensity(meshcat, 0.5, f"iris/obstacles/obstacle_{i}")
             i += 1
 
@@ -107,7 +175,17 @@ class IrisWrapper:
         if meshcat is None:
             return
         
+        if self.use_CliqueCover:
+            if (self.samples is None) or (self.cliques is None):
+                raise ValueError("None sample or clique type")
+
+            isc.plot_points(meshcat, self.samples, "sample_points", visible=False)
+            
+            isc.plot_cliques(meshcat, self.cliques, self.samples, "cliques", visible=False)
+        
+        
         i=0
+        colors = [pyGeo.Rgba(c[0], c[1], c[2], .2) for c in isc.generate_maximally_different_colors(len(self.iris_regions))]
         for region in self.iris_regions:
             vertices = pyOpt.VPolytope(region).vertices()
             geoUtils.visualizeToMesh_3D_convex_hull(meshcat, 
@@ -115,8 +193,8 @@ class IrisWrapper:
                                                     label=f"iris/regions/region_{i}", 
                                                     visible=is_visible, 
                                                     fill=True,
-                                                    color=[0, 0.1, 0, .2])
-            geoUtils.set_intensity(meshcat, 0.2, f"iris/regions/region_{i}")
+                                                    color=colors[i])
+            # geoUtils.set_intensity(meshcat, 0.2, f"iris/regions/region_{i}")
             i += 1
         return
     
@@ -166,41 +244,105 @@ class IrisWrapper:
             print(f"Chosen point: {sample}")
             return sample
 
-    def save_regions_to_file(self, filename=REGION_FILE_PATH):
-
-        with open(filename, 'wb') as f:
-            pickle.dump(self.iris_regions, f)
+    def find_NSamplePoints(self, N, max_iter=100):
+        vp_obst = convert_and_minimize(self.iris_obstacles)
         
-        print(f"Regions saved to {filename}")
-        return self.iris_regions
+        def in_collision(point):
+            return any(vp.PointInSet(point) for vp in vp_obst)
+
+        samples = []
+        prevSample = None
+        for i in range(N):
+            sample = None
+            if prevSample:
+                sample = self.domain.UniformSample(self.randomGen,previous_sample=sample)
+            else:
+                sample = self.domain.UniformSample(self.randomGen)
+
+            iter = 0
+            while in_collision(sample) and iter<=max_iter:
+                sample = self.domain.UniformSample(self.randomGen,previous_sample=sample)
+                iter += 1
+            
+            samples.append(sample)
+            
+            if iter>max_iter:
+                print("Max iterations reached")
+                
+            print(f"Chosen point_({i}/{N}): {sample}")
+            
+        return np.array(samples)
     
-    def load_regions_from_file(self, filename=REGION_FILE_PATH):
+    
+    
+    def save_regions_to_file(self):
+        
+        if self.use_CliqueCover:
+            
+            try:
+                path = self.region_file_path+"_clique.pkl"
+                with open(path, 'wb') as f:
+                    pickle.dump((self.iris_regions, self.samples, self.cliques), f)
+                
+                print(f"Regions saved to {path}")
+                return self.iris_regions, self.samples, self.cliques
+            except Exception as e:
+                print(f"Failed to save regions to {self.region_file_path}")
+                print(f"Error: {e}")
+                return None
+        else:
+            
+            try:
+                path = self.region_file_path+".pkl"
+                with open(path, 'wb') as f:
+                    pickle.dump(self.iris_regions, f)
+                
+                print(f"Regions saved to {path}")
+                return self.iris_regions
+            except Exception as e:
+                print(f"Failed to save regions to {path}")
+                print(f"Error: {e}")
+                return None
+            
+
+    
+    def load_regions_from_file(self):
         
         reg = None
         
-        # if file exist 
-        
-        try:
+        if self.use_CliqueCover:
+            samples = None
+            cliques = None
+            try:
+                path = self.region_file_path+"_clique.pkl"
+                with open(path, 'rb') as f:
+                    reg, samples, cliques = pickle.load(f)
             
-            with open(filename, 'rb') as f:
-                reg = pickle.load(f)
+                self.iris_regions = reg
+                self.samples = samples
+                self.cliques = cliques
+                print(f"Regions loaded from {path}")
+                return reg, samples, cliques
+            except Exception as e:
+                print(f"Regions not loaded from {path}")
+                print(f"Error: {e}")
+                return None
+        else:
+            try:
+                path = self.region_file_path+".pkl"
+                with open(path, 'rb') as f:
+                    reg = pickle.load(f)
+                    
+                print(f"Regions loaded from {path}")
+                self.iris_regions = reg
+                return reg
                 
-            print(f"Regions loaded from {filename}")
+            except Exception as e:
+                print(f"Regions not loaded from {path}")
+                print(f"Error: {e}")
+                return None
             
-            
-        except FileNotFoundError:
-            print(f"Regions not loaded from {filename}")
-            return None
-        
-           
-        if reg is None or reg == {}:
-            print(f"Regions not loaded from {filename}")
-            return None
 
-        self.iris_regions = reg
-                
-        return reg
-        
 
 
 def convert_and_minimize(hpoly_list):

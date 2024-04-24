@@ -105,7 +105,7 @@ def get_2Dfaces_of_convex_hull():
 
 
 
-def visualizeToMesh_3D_convex_hull(meshcat, vertices, label="convex_hull", visible=False, fill=True, color=[0.3, 0.3, 0.3, 1]):
+def visualizeToMesh_3D_convex_hull(meshcat, vertices, label="convex_hull", visible=False, fill=True, color=pyGeo.Rgba(0.3, 0.3, 0.3, 1)):
     # vertices: list of vertices of the convex hull
     # returns: None
     
@@ -122,7 +122,7 @@ def visualizeToMesh_3D_convex_hull(meshcat, vertices, label="convex_hull", visib
         path=label,
         vertices=vertices,
         faces=faces_3D,
-        rgba=pyGeo.Rgba(*color), # grey
+        rgba= color, # grey
         wireframe= not fill,                # Fill in the mesh (not just lines)
         wireframe_line_width=2.0,
         # side=self.meshcat.SideOfFaceToRender.kBackSide
@@ -136,11 +136,11 @@ def set_intensity(meshcat, intensity, label):
     
     return
 
-def visualize_point(meshcat, point, label="trajetory/point", radius=0.05, color=[0, 0, 1, 1], visible=True):
+def visualize_point(meshcat, point, label="trajetory/point", radius=0.05, color=pyGeo.Rgba(0, 0, 1, 1), visible=True):
     
     meshcat.SetObject(path=label,
                       shape=pyGeo.Sphere(radius), 
-                      rgba=pyGeo.Rgba(*color)
+                      rgba=color
                       )
 
     meshcat.SetTransform(path=label,

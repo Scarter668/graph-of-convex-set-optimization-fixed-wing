@@ -44,7 +44,15 @@ if __name__ == "__main__":
     # Solve IRIS
 
     print("################ Starting IRIS region computation ################\n")
-    irisWrapper = irisUtils.IrisWrapper()    
+    irisOptions = irisUtils.IrisWrapperOptions()
+    irisOptions.use_CliqueCover = True
+    irisOptions.num_regions = 10
+    irisOptions.obstacle_scale_factor = obstacle_ScaleFactor
+    irisOptions.seed = 0
+    irisOptions.region_file_path = "region_files/iris_regions"
+    irisOptions.clique_num_points = 200
+    
+    irisWrapper = irisUtils.IrisWrapper(irisOptions)    
     simEnv.compute_obstacles(irisWrapper)
     irisWrapper.determine_and_set_domain(center_ground_xy, ground_width, ground_length, obst_height)    
     
@@ -54,11 +62,10 @@ if __name__ == "__main__":
     
     if irisWrapper.load_regions_from_file() is None:
             
-        num_regions = 25 
-        irisWrapper.solveIRIS_with_num_regions(num_regions, obstacle_scale_factor=obstacle_ScaleFactor)
+        irisWrapper.solveIRIS()
         irisWrapper.save_regions_to_file()
     
-    irisWrapper.add_meshVisualization_iris_regions(simEnv.meshcat, is_visible=False) 
+    irisWrapper.add_meshVisualization_iris_regions(simEnv.meshcat, is_visible=True) 
     
     
     print("################ FINISHED IRIS computation ################\n\n")
@@ -69,13 +76,15 @@ if __name__ == "__main__":
     
     print("################ Solving GCS trajectory ################\n")
     options = gcsUtils.GCSTrajectoryOptions()
-    options.use_BezierGCS = True
+    options.use_BezierGCS = False
     options.regions = irisWrapper.iris_regions
-    options.path_continuity_order = 3 # 3 works
-    options.Bspline_order = 4   # 4 works
+    options.path_continuity_order = 4 # 3 works
+    options.Bspline_order = 5   # 4 works
     # options.edges = None
     options.hdot_min = 1e-3
     options.full_dim_overlap = True
+    options.traj_file_path = 'trajectory_files/trajectory'
+    options.derivative_regularization = 1e-3
     
     gcsTraj = gcsUtils.GCSTrajectory(3, options)
     start = [0, 0, 1]
@@ -83,15 +92,13 @@ if __name__ == "__main__":
     # goal = [0, 10.5, 1.5]
     
     gcsTraj.add_start_goal_and_viz(start, goal, simEnv.meshcat, zero_deriv_boundary=1)
-    gcsTraj.add_pathLengthCost(1)
-    gcsTraj.add_timeCost(0.001)
+    gcsTraj.add_pathLengthCost(100)
+    gcsTraj.add_timeCost(1)
     gcsTraj.add_velocityBounds(vel_lower_bound, vel_upper_bound)
-    regularization = 1e-3
-    gcsTraj.add_derivativeRegularization_r_h(weight=regularization, order=2) # add nth derivative as a cost in costfunction
+    gcsTraj.add_continuityContraint()
     
-    # gcsTraj.add_regions(irisWrapper.iris_regions, order=7)
-    # gcsTraj.add_continuityContraint(3)
     
+    # input("Press Enter to solve the trajectory...")
     if gcsTraj.load_trajectory_from_file() is None:
         gcsTraj.solve(preprocessing=False)   
         gcsTraj.save_trajectory_to_file()
@@ -103,20 +110,20 @@ if __name__ == "__main__":
     
     
     
-    print("################ Startting Simulation ################\n\n")
+    print("################ Starting Simulation ################\n\n")
     
     simulator = sim.SimulationEnvironment(PATH_TO_OBSTACLE_ENV)
     simulator.connect_meshcat()
     simulator.add_fixed_wing()
     simulator.add_controller(gcsTraj.trajectory.value(6))
     simulator.build_model()
-    simulator.save_and_display_diagram()
+    # simulator.save_and_display_diagram()
     
     
     sim.print_model_instances(simulator.plant)
 
     # Visualization
-    irisWrapper.add_meshVisualization_iris_regions(simulator.meshcat, is_visible=False) 
+    irisWrapper.add_meshVisualization_iris_regions(simulator.meshcat, is_visible=True) 
     gcsTraj.visualize_start_goal(start, goal, simulator.meshcat)
     gcsTraj.visualize_trajectory(simulator.meshcat, num_points)
     irisWrapper.add_meshVisualization_iris_obstacles(simulator.meshcat, is_visible=False)
@@ -131,8 +138,6 @@ if __name__ == "__main__":
     # s0.xdot = 7.0
     
     # pp.draw_glider(s0[:], simulator.meshcat )
-    
-
     
     print("################ FINISHED Simulation ################\n\n")
     

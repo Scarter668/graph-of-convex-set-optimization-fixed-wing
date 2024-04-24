@@ -265,7 +265,7 @@ class SimulationEnvironment():
             perching_plane_context = self.diagram.GetMutableSubsystemContext(self.perching_plane, simulator_context)
             rng = np.random.default_rng(123)
             
-            for _ in range(10):
+            for _ in range(2):
                 simulator_context.SetTime(self.x_traj.start_time())
                 initial_state = pp.GliderState(self.x_traj.value(self.x_traj.start_time()))
                 initial_state.z += 0.04 * rng.standard_normal()

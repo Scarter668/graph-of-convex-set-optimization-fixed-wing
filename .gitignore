@@ -5,3 +5,5 @@ example_models/*
 *.ipynb
 
 __pycache__/*
+
+**_files
