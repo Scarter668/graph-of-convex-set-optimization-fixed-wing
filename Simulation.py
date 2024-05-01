@@ -47,13 +47,16 @@ import pydot
 import cairosvg ##To save the svg file
 
 import PerchingPlane as pp
+import FixedWing as fw
+import FlatnessInverter as fi
+import GeometryUtils as geoUtils
 
 
 FIXED_WING = 0
 QUADROTOR = 1
 PERCHING_PLANE = 2
 
-PLANT_TYPE = PERCHING_PLANE
+PLANT_TYPE = FIXED_WING
 
 
 class SimulationEnvironment():
@@ -67,7 +70,7 @@ class SimulationEnvironment():
 
     
         
-    def __init__(self, obstacle_load_path):
+    def __init__(self, obstacle_load_path=""):
         
         
         ## assign the builder, plant and scene_graph
@@ -76,17 +79,21 @@ class SimulationEnvironment():
         
         self.plant.set_name("obstacle_UAV_plant")
         
-        
-        ## load the obstacles
-        with open(obstacle_load_path, 'r') as file:
-            urdf_obstacle = file.read()
-        
-        obstacle_instance = Parser(self.plant).AddModelsFromString(urdf_obstacle, "urdf")[0] # returns a list with length 1
-        
+        if obstacle_load_path:
+            ## load the obstacles
+            with open(obstacle_load_path, 'r') as file:
+                urdf_obstacle = file.read()
+            
+            obstacle_instance = Parser(self.plant).AddModelsFromString(urdf_obstacle, "urdf")[0] # returns a list with length 1
 
-        self.plant.WeldFrames(self.plant.world_frame(), 
+            self.plant.WeldFrames(self.plant.world_frame(), 
                               self.plant.GetFrameByName("ground", obstacle_instance)
                               )
+            print("Obstacles loaded")
+            
+        else:
+            print("No obstacles loaded")
+            
         self.plant.Finalize()
             
         return
@@ -112,6 +119,9 @@ class SimulationEnvironment():
             return
             
         elif PLANT_TYPE == FIXED_WING:
+            self.fixed_plane = self.builder.AddSystem(fw.FixedWingPlant())
+            fw.FixedWingGeometry.AddToBuilder(self.builder, self.fixed_plane.GetOutputPort("state"), self.scene_graph)
+            self.fixed_plane.set_name("fixed_wing")
             return
         
         raise ValueError("Invalid plant type")
@@ -184,7 +194,7 @@ class SimulationEnvironment():
         self.diagram.set_name("Root_Diagram")
         return 
     
-    def save_and_display_diagram(self):
+    def save_and_display_diagram(self, save=True):
         svg = pydot.graph_from_dot_data(
                     self.diagram.GetGraphvizString(
                         max_depth=3))[0].create_svg()
@@ -193,9 +203,11 @@ class SimulationEnvironment():
         svg_filename = "figures/Root_diagram.svg"
         image_filename = "figures/Root_diagram.png"
         
-        # Write the SVG content to a file
-        with open(svg_filename, "wb") as svg_file:
-            svg_file.write(svg)
+        
+        if save:
+            # Write the SVG content to a file
+            with open(svg_filename, "wb") as svg_file:
+                svg_file.write(svg)
 
         cairosvg.svg2png(url=svg_filename, write_to=image_filename)
                 
@@ -234,7 +246,7 @@ class SimulationEnvironment():
         
     
      
-    def simulate(self, time=5):
+    def simulate(self, time=5, trajectory=None):
         simulator = Simulator(self.diagram)
         simulator.set_target_realtime_rate(1.0)
         simulator_context = simulator.get_mutable_context()
@@ -280,7 +292,74 @@ class SimulationEnvironment():
                 return
             
         elif PLANT_TYPE == FIXED_WING:
+            perching_plane_context = self.diagram.GetMutableSubsystemContext(self.fixed_plane, simulator_context)
+            if trajectory is None:
+                raise ValueError("Trajectory is required for fixed wing simulation")
+
+            num_timesteps = 100
+            num_dofs = 3
+            p_numeric = np.empty((num_timesteps, num_dofs))
+            dp_numeric = np.empty((num_timesteps, num_dofs))
+            ddp_numeric = np.empty((num_timesteps, num_dofs))
+            dddp_numeric = np.empty((num_timesteps, num_dofs))
+            sample_times_s = np.linspace(
+                trajectory.start_time(), trajectory.end_time(), num=num_timesteps, endpoint=True
+            )
+
+            # Calculating the velocity magnitudes
+            velocity_magnitudes = np.empty(num_timesteps)
+
+            for i, t in enumerate(sample_times_s):
+                p_numeric[i] = trajectory.value(t).flatten()
+                dp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=1).flatten()
+                ddp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=2).flatten()
+                dddp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=3).flatten()
+                velocity_magnitudes[i] = np.sqrt(np.sum(dp_numeric[i]**2))
+
+            # Find indices where the velocity is not zero
+            non_zero_velocity_indices = np.where(velocity_magnitudes > 0)[0]
+
+            if len(non_zero_velocity_indices) == 0:
+                raise ValueError("All velocities are zero, which is unexpected in a valid trajectory.")
+
+            # Clipping trajectories to non-zero velocities
+            start_index = non_zero_velocity_indices[0]
+            end_index = non_zero_velocity_indices[-1]
+
+            p_numeric = p_numeric[start_index:end_index+1]
+            dp_numeric = dp_numeric[start_index:end_index+1]
+            ddp_numeric = ddp_numeric[start_index:end_index+1]
+            dddp_numeric = dddp_numeric[start_index:end_index+1]
+            sample_times_s = sample_times_s[start_index:end_index+1]
+
+            m = 0.1
+            g = 9.81
+            
+            self.meshcat.StartRecording()
+
+            trajectory_frames = []
+            for p, dp, ddp, dddp, t in zip(
+                p_numeric,
+                dp_numeric,
+                ddp_numeric,
+                dddp_numeric,
+                sample_times_s
+            ):
+                stateNED = fi.UnflattenFixedWingStatesNED(p, dp, ddp, dddp, m, g)
+                X_DrB = fi.ExtractTransformation(stateNED)
+                trajectory_frames.append(X_DrB)                
+
+                simulator_context.SetContinuousState(stateNED[:])
+                simulator.AdvanceTo(t)
+
+            geoUtils.visualize_key_frames(self.meshcat, trajectory_frames)
+
+            self.meshcat.StopRecording()
+            self.meshcat.PublishRecording()
+            
             return
+            
+            
         
         raise ValueError("Invalid plant type")
 

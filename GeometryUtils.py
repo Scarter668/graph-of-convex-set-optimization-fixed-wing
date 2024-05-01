@@ -5,84 +5,86 @@ import numpy as np
 
 from scipy.spatial import ConvexHull
 
-def get_obstacleID_geometries(plant):
+from underactuated.meshcat_utils import AddMeshcatTriad
+
+# def get_obstacleID_geometries(plant):
     
-    obstacle_bodies = plant.GetBodiesWeldedTo(plant.GetBodyByName("ground"))
+#     obstacle_bodies = plant.GetBodiesWeldedTo(plant.GetBodyByName("ground"))
     
-    # only get the bodies that are obstacles
-    obstacle_bodies = [body for body in obstacle_bodies if "obs" in body.name()]
+#     # only get the bodies that are obstacles
+#     obstacle_bodies = [body for body in obstacle_bodies if "obs" in body.name()]
     
-    obstacle_geometries = []
+#     obstacle_geometries = []
     
-    for body in obstacle_bodies:
-        for geom in plant.GetCollisionGeometriesForBody(body):
-            obstacle_geometries.append(geom)
+#     for body in obstacle_bodies:
+#         for geom in plant.GetCollisionGeometriesForBody(body):
+#             obstacle_geometries.append(geom)
     
-    return obstacle_geometries
+#     return obstacle_geometries
     
-def get_obstacle_vertices(plant, query_object, inspector ):
+# def get_obstacle_vertices(plant, query_object, inspector ):
     
-    geometry_ids = get_obstacleID_geometries(plant)
+#     geometry_ids = get_obstacleID_geometries(plant)
     
-    obstacle_vertices = []
+#     obstacle_vertices = []
            
-    for geometry_id in geometry_ids:
-        shape = inspector.GetShape(geometry_id) ## should all be boxes    
-        if not isinstance(shape, pyGeo.Box):
-            raise ValueError("Unsupported geometry type")
+#     for geometry_id in geometry_ids:
+#         shape = inspector.GetShape(geometry_id) ## should all be boxes    
+#         if not isinstance(shape, pyGeo.Box):
+#             raise ValueError("Unsupported geometry type")
         
-        X_WB = query_object.GetPoseInWorld(geometry_id)
-        box_vert = get_box_vertices(shape, X_WB)
-        obstacle_vertices.append( box_vert )        
+#         X_WB = query_object.GetPoseInWorld(geometry_id)
+#         box_vert = get_box_vertices(shape, X_WB)
+#         obstacle_vertices.append( box_vert )        
     
-    return obstacle_vertices
+#     return obstacle_vertices
     
-def get_box_vertices(box, X_WB):
-    # Return axis-aligned bounding-box vertices
-    # Order:                +y
-    #       3------2          |
-    #      /|     /|          |
-    #     / 4----/-5          ------  +x
-    #    0------1 /          /
-    #    |/     |/          /
-    #    7------6        +z
+# def get_box_vertices(box, X_WB):
+#     # Return axis-aligned bounding-box vertices
+#     # Order:                +y
+#     #       3------2          |
+#     #      /|     /|          |
+#     #     / 4----/-5          ------  +x
+#     #    0------1 /          /
+#     #    |/     |/          /
+#     #    7------6        +z
 
     
-    half_width = box.width() / 2
-    half_height = box.height() / 2
-    half_depth = box.depth() / 2
+#     half_width = box.width() / 2
+#     half_height = box.height() / 2
+#     half_depth = box.depth() / 2
     
-    # vertices in box frame
-    vertices_box_frame = [
-        [-half_width, half_depth, half_height],
-        [half_width, half_depth , half_height ],
-        [half_width, half_depth,  -half_height],
-        [-half_width, half_depth, -half_height],
-        [-half_width, -half_depth,  -half_height],
-        [half_width, -half_depth, -half_height],
-        [half_width, -half_depth , half_height],
-        [-half_width, -half_depth , half_height],
-    ]
+#     # vertices in box frame
+#     vertices_box_frame = [
+#         [-half_width, half_depth, half_height],
+#         [half_width, half_depth , half_height ],
+#         [half_width, half_depth,  -half_height],
+#         [-half_width, half_depth, -half_height],
+#         [-half_width, -half_depth,  -half_height],
+#         [half_width, -half_depth, -half_height],
+#         [half_width, -half_depth , half_height],
+#         [-half_width, -half_depth , half_height],
+#     ]
     
-    vertices_box_frame = np.array(vertices_box_frame).T # shape: (3, 8)
+#     vertices_box_frame = np.array(vertices_box_frame).T # shape: (3, 8)
     
-    # print("vertices_box_frame: ", vertices_box_frame)
-    # print("vertices_box_frame.shape: ", vertices_box_frame.shape)
-    # print()
+#     # print("vertices_box_frame: ", vertices_box_frame)
+#     # print("vertices_box_frame.shape: ", vertices_box_frame.shape)
+#     # print()
     
-    transformed_points = X_WB.multiply(vertices_box_frame)
+#     transformed_points = X_WB.multiply(vertices_box_frame)
     
-    # print("transformed_points: ", transformed_points)
-    # print("transformed_points.shape: ", transformed_points.shape)
+#     # print("transformed_points: ", transformed_points)
+#     # print("transformed_points.shape: ", transformed_points.shape)
     
     
     
-    # print all the vertices
-    # for i in range(transformed_points.shape[0]):
-    #     print(f"Vertex {i}: {transformed_points[i]}")
+#     # print all the vertices
+#     # for i in range(transformed_points.shape[0]):
+#     #     print(f"Vertex {i}: {transformed_points[i]}")
         
     
-    return transformed_points
+#     return transformed_points
 
 
 
@@ -150,3 +152,27 @@ def visualize_point(meshcat, point, label="trajetory/point", radius=0.05, color=
     
     return
 
+
+
+def visualize_frame(meshcat, name, X_WF, length=0.15, radius=0.003):
+    """
+    visualize imaginary frame that are not attached to existing bodies
+
+    Input:
+        name: the name of the frame (str)
+        X_WF: a RigidTransform from frame F to world.
+
+    Frames whose names already exist will be overwritten by the new frame
+    """
+    AddMeshcatTriad(
+        meshcat, "traj_source/" + name, length=length, radius=radius, X_PT=X_WF
+    )
+
+    # print("Visualized frame: ", X_WF)
+
+## Visualization of key frames:
+def visualize_key_frames(meshcat, frame_poses):
+    for i, pose in enumerate(frame_poses):
+        visualize_frame(meshcat,"frame_{}".format(i), pose, length=0.3)
+        
+        

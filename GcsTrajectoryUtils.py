@@ -20,13 +20,18 @@ class GCSTrajectoryOptions():
     regions = None
     Bspline_order = None
     path_continuity_order = None
+    
+    use_BezierGCS = False
     edges = None
     hdot_min = 1e-6 
     full_dim_overlap = True
-    
-    use_BezierGCS = False
-    traj_file_path = TRAJECTORY_FILE_PATH
     derivative_regularization = 1e-3
+    
+    traj_file_path = TRAJECTORY_FILE_PATH
+    
+    
+    start_velocity_lb = None 
+    goal_velocity_lb = None
     
     def __init__(self):
         return
@@ -53,6 +58,7 @@ class GCSTrajectory():
     region_to_goal = None
     
     trajectory = None
+    velocity_ub = None
     
     
     def __init__(self, kdimentions = 3, options = GCSTrajectoryOptions()):
@@ -65,6 +71,10 @@ class GCSTrajectory():
         self.Bspline_order = options.Bspline_order
         self.regions = options.regions
         self.derivative_regularization = options.derivative_regularization
+        
+        
+        self.start_velocity_lb = options.start_velocity_lb
+        self.goal_velocity_lb = options.goal_velocity_lb
         
         if not options.is_defined():
             raise ValueError("Options are not defined when using Bezier/GCS")
@@ -134,8 +144,16 @@ class GCSTrajectory():
             if self.regions is None:
                 raise ValueError("No regions")
             
-            self.start_to_region = self.gcsTrajOpt.AddEdges(self.source, self.regions)
-            self.region_to_goal = self.gcsTrajOpt.AddEdges(self.regions, self.target)
+            start_to_region = self.gcsTrajOpt.AddEdges(self.source, self.regions)
+            region_to_goal = self.gcsTrajOpt.AddEdges(self.regions, self.target)
+            
+            if (self.start_velocity_lb is None) or (self.goal_velocity_lb is None):
+                print("Warning: start/goal velocity constraints are not defined, and will not be used")
+            else:
+                start_to_region.AddVelocityBounds(self.start_velocity_lb, self.velocity_ub)
+                region_to_goal.AddVelocityBounds(self.goal_velocity_lb, self.velocity_ub)
+                
+                
             return
         raise ValueError("connect_graph is not supported for Bezier GCS")
     
@@ -165,6 +183,8 @@ class GCSTrajectory():
             self.gcsTrajOpt.addVelocityLimits(lb, ub)
         else:
             self.gcsTrajOpt.AddVelocityBounds(lb, ub)
+            
+        self.velocity_ub = ub
         return
     
     def add_continuityContraint(self):

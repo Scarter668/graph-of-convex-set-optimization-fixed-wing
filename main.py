@@ -4,25 +4,27 @@ import GcsTrajectoryUtils as gcsUtils
 
 import numpy as np
 
-from pydrake.solvers import MosekSolver
 
 import time
 
 PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation.urdf"
 
 # width of ground, lenght of ground,height of highest obstavle + 1. Look in urdf file
-center_ground_xy = np.array([0, 5]) 
-ground_width = 7
-ground_length = 15
-obst_height = 2
+CENTER_GROUND_XY = np.array([0, 5]) 
+GROUND_WIDTH = 7
+GROUND_LENGTH = 15
+OBST_HEIGHT = 2
 
-obstacle_ScaleFactor=1.3
+OBSTACLE_SCALEFACTOR=1.3
 
 # trajectory
-kdimentions = 3
-vel_lower_bound = np.ones(kdimentions) * -1
-vel_upper_bound =  np.ones(kdimentions) * 1 #np.array([100000, 100000, 100000])
+KDIMENTIONS = 3
+VEL_LOWER_BOUND = np.ones(KDIMENTIONS) * -2
+VEL_UPPER_BOUND =  np.ones(KDIMENTIONS) * 2 #np.array([100000, 100000, 100000])
 
+START_VELOCITY_LB = np.array([0.8, 0.8, 0.1])
+# START_VELOCITY_LB = np.array([-0.8, -0.4, -0.01])
+GOAL_VELOCITY_LB = np.array([0.1, 0.2, 0.1])
 
 
 
@@ -47,14 +49,14 @@ if __name__ == "__main__":
     irisOptions = irisUtils.IrisWrapperOptions()
     irisOptions.use_CliqueCover = True
     irisOptions.num_regions = 10
-    irisOptions.obstacle_scale_factor = obstacle_ScaleFactor
+    irisOptions.obstacle_scale_factor = OBSTACLE_SCALEFACTOR
     irisOptions.seed = 0
     irisOptions.region_file_path = "region_files/iris_regions"
     irisOptions.clique_num_points = 200
     
     irisWrapper = irisUtils.IrisWrapper(irisOptions)    
     simEnv.compute_obstacles(irisWrapper)
-    irisWrapper.determine_and_set_domain(center_ground_xy, ground_width, ground_length, obst_height)    
+    irisWrapper.determine_and_set_domain(CENTER_GROUND_XY, GROUND_WIDTH, GROUND_LENGTH, OBST_HEIGHT)    
     
     # irisWrapper.add_meshVisualization_iris_obstacles(simEnv.meshcat, is_visible=True)
     # irisWrapper.add_meshVisualization_iris_domain(simEnv.meshcat, is_visible=True)
@@ -81,26 +83,32 @@ if __name__ == "__main__":
     options.path_continuity_order = 4 # 3 works
     options.Bspline_order = 5   # 4 works
     # options.edges = None
+
+    options.start_velocity_lb = START_VELOCITY_LB
+    options.goal_velocity_lb = GOAL_VELOCITY_LB
+
+
     options.hdot_min = 1e-3
     options.full_dim_overlap = True
     options.traj_file_path = 'trajectory_files/trajectory'
     options.derivative_regularization = 1e-3
     
-    gcsTraj = gcsUtils.GCSTrajectory(3, options)
+    gcsTraj = gcsUtils.GCSTrajectory(KDIMENTIONS, options)
     start = [0, 0, 1]
     goal = [0.5, 11.5, 1.5]
     # goal = [0, 10.5, 1.5]
+    # goal = [-1.5, 7.5, 1]
     
-    gcsTraj.add_start_goal_and_viz(start, goal, simEnv.meshcat, zero_deriv_boundary=1)
-    gcsTraj.add_pathLengthCost(100)
-    gcsTraj.add_timeCost(1)
-    gcsTraj.add_velocityBounds(vel_lower_bound, vel_upper_bound)
+    gcsTraj.add_start_goal_and_viz(start, goal, simEnv.meshcat, zero_deriv_boundary=None)
+    gcsTraj.add_pathLengthCost(1000)
+    gcsTraj.add_timeCost(10)
+    gcsTraj.add_velocityBounds(VEL_LOWER_BOUND, VEL_UPPER_BOUND)
     gcsTraj.add_continuityContraint()
     
     
     # input("Press Enter to solve the trajectory...")
     if gcsTraj.load_trajectory_from_file() is None:
-        gcsTraj.solve(preprocessing=False)   
+        gcsTraj.solve(preprocessing=True)   
         gcsTraj.save_trajectory_to_file()
         
     num_points = 2000
@@ -117,7 +125,7 @@ if __name__ == "__main__":
     simulator.add_fixed_wing()
     simulator.add_controller(gcsTraj.trajectory.value(6))
     simulator.build_model()
-    # simulator.save_and_display_diagram()
+    simulator.save_and_display_diagram()
     
     
     sim.print_model_instances(simulator.plant)
@@ -129,7 +137,7 @@ if __name__ == "__main__":
     irisWrapper.add_meshVisualization_iris_obstacles(simulator.meshcat, is_visible=False)
     irisWrapper.add_meshVisualization_iris_domain(simulator.meshcat, is_visible=True)
 
-    simulator.simulate(5)
+    simulator.simulate(5, gcsTraj.trajectory)
     
     
     # s0 = pp.GliderState(np.zeros(7))
