@@ -14,7 +14,7 @@ from pydrake.multibody.parsing import Parser
 
 from pydrake.planning import DirectCollocation
 
-from pydrake.math import RigidTransform, RotationMatrix
+from pydrake.math import RigidTransform, RollPitchYaw, RotationMatrix
 
 from pydrake.geometry import MeshcatVisualizer, SceneGraph, Cylinder, FramePoseVector
 
@@ -32,15 +32,22 @@ from FlatnessInverter import FixedWingStatesNED
 import FlatnessInverter as fi
 
 NUM_STATES = 12
+NUM_INPUTS = 4
 
-# FixedWingStatesNEDsNED = namedview(
-#     "FixedWingNStatesNED", ["x", "y", "z", "v_a", "betha", "alpha", "chi", "gamma", "mu", "p", "q", "r"]
-# )
+
+
+FullState = namedview(
+    "FullState",
+    [
+        "x", "y", "z", "v_a", "betha", "alpha", "chi", "gamma", "mu", "p", "q", "r",
+        "delta_le", "delta_re", "delta_lm", "delta_rm"
+    ]
+)
+
 
 # Note: In order to use the Python system with drake's autodiff features, we
 # have to add a little "TemplateSystem" boilerplate (for now).  For details,
 # see https://drake.mit.edu/pydrake/pydrake.systems.scalar_conversion.html
-
 
 @TemplateSystem.define("FixedWingPlant_")
 def FixedWingPlant_(T):
@@ -48,10 +55,10 @@ def FixedWingPlant_(T):
         def _construct(self, converter=None):
             LeafSystem_[T].__init__(self, converter)
             # one inputs (elevator_velocity)
-            self.DeclareVectorInputPort("elevatordot", 1)
-            self.DeclareContinuousState(NUM_STATES)
+            self.DeclareVectorInputPort("inputs", NUM_INPUTS)
+            self.DeclareContinuousState(NUM_STATES+NUM_INPUTS)
             # seven outputs (full state)
-            self.DeclareVectorOutputPort("state", NUM_STATES, self.CopyStateOut)
+            self.DeclareVectorOutputPort("full_state", NUM_STATES+NUM_INPUTS, self.CopyStateOut)
             self.DeclareVectorOutputPort("forces", 2, self.OutputForces)
 
             # parameters based on Rick Cory's "R1 = no dihedral" model.
@@ -77,7 +84,8 @@ def FixedWingPlant_(T):
             # s = FixedWingStatesNED(
             #     context.get_mutable_continuous_state_vector().CopyToVector()
             # )
-            # elevatordot = self.EvalVectorInput(context, 0)[0]
+            # print(self.EvalVectorInput(context, 0))
+            (delta_le, delta_re, w_lm, w_rm)  = self.EvalVectorInput(context, 0).CopyToVector()
 
             # eps = 1e-10
             # xwdot = s.xdot + self.lw * s.pitchdot * np.sin(s.pitch)
@@ -124,7 +132,7 @@ def FixedWingPlant_(T):
             # sdot.pitchdot = (
             #     fw * self.lw + fe * (self.lh * np.cos(s.elevator) + self.le)
             # ) / self.inertia
-            sdot = np.zeros(NUM_STATES)
+            sdot = np.zeros(NUM_STATES+NUM_INPUTS)
             derivatives.get_mutable_vector().SetFromVector(sdot)
 
         def CopyStateOut(self, context, output):
@@ -150,24 +158,32 @@ class FixedWingGeometry(LeafSystem):
 
         mbp = MultibodyPlant(1.0)  # Time step doesn't matter, and this avoids a warning
         parser = Parser(mbp, scene_graph)
-        ConfigureParser(parser)
-        (model_id,) = parser.AddModelsFromUrl(
-            "package://underactuated/models/glider/glider.urdf"
-        )
-
-        # perch_id = AddShape(mbp, Cylinder(0.02, 2.0), "perch")
-        # self.X_perch_ = RigidTransform(RotationMatrix.MakeXRotation(np.pi / 2.0))
-        # mbp.WeldFrames(mbp.world_frame(), mbp.GetFrameByName("perch"), self.X_perch_)
+        parser.package_map().PopulateFromFolder("DeltaWingModel")
+        
+        deltawing_urdf = None
+        try:
+            PLANE_URDF_PATH = "DeltaWingModel/urdf/DeltaWing.urdf"
+            with open(PLANE_URDF_PATH, 'r') as file:
+                deltawing_urdf = file.read()
+        except Exception as e:
+            raise ValueError("Error reading the urdf file: ", e)
+            
+        
+        (model_id, ) = parser.AddModelsFromString(deltawing_urdf, "urdf")
 
         mbp.Finalize()
-        self.source_id = mbp.get_source_id()
-        self.body_frame_id = mbp.GetBodyFrameIdOrThrow(mbp.GetBodyIndices(model_id)[0])
-        self.elevator_frame_id = mbp.GetBodyFrameIdOrThrow(
-            mbp.GetBodyIndices(model_id)[1]
-        )
-        # self.perch_frame_id = mbp.GetBodyFrameIdOrThrow(mbp.GetBodyIndices(perch_id)[0])
 
-        self.DeclareVectorInputPort("state", NUM_STATES)
+
+        self.source_id = mbp.get_source_id()
+        body_indices = mbp.GetBodyIndices(model_id)
+        self.body_frame_id = mbp.GetBodyFrameIdOrThrow(body_indices[0])
+        self.right_motor_frame_id = mbp.GetBodyFrameIdOrThrow(body_indices[1])
+        self.left_motor_frame_id = mbp.GetBodyFrameIdOrThrow(body_indices[2])
+        self.rigth_elevon_frame_id = mbp.GetBodyFrameIdOrThrow(body_indices[3])
+        self.left_elevon_frame_id = mbp.GetBodyFrameIdOrThrow(body_indices[4])
+        
+        
+        self.DeclareVectorInputPort("full_state", NUM_STATES+NUM_INPUTS)
         self.DeclareAbstractOutputPort(
             "geometry_pose",
             lambda: AbstractValue.Make(FramePoseVector()),
@@ -176,37 +192,60 @@ class FixedWingGeometry(LeafSystem):
 
     def OutputGeometryPose(self, context, poses):
         assert self.body_frame_id.is_valid()
-        assert self.elevator_frame_id.is_valid()
-        lh = 0.317  # elevator hinge.
+        assert self.right_motor_frame_id.is_valid()
+        assert self.left_motor_frame_id.is_valid()
+        assert self.rigth_elevon_frame_id.is_valid()
+        assert self.left_elevon_frame_id.is_valid()
         
-        stateNED = FixedWingStatesNED(self.get_input_port(0).Eval(context))
-
-
+    
+        
+        full_state = FullState(self.get_input_port(0).Eval(context)) 
+        
+        stateNED = FixedWingStatesNED(full_state[:NUM_STATES])
+        
         X_DrB = fi.ExtractTransformation(stateNED)
         
+        body_pose = X_DrB
         
-        body_pose = X_DrB @ RigidTransform(RotationMatrix.MakeXRotation(np.pi)) # since perching plane has 
+        # From the urdf file
+        R_Blm = RollPitchYaw(np.pi/2, 0, np.pi/2).ToRotationMatrix()
+        p_Blm = [-0.013, -0.25, 0]
+        X_Blm = RigidTransform(R_Blm, p_Blm)
         
-        # not importen
-        elevator_pose = body_pose @ RigidTransform(
-            RotationMatrix.MakeYRotation(stateNED.mu ),
-            [
-                (- lh * np.cos(stateNED.mu)),
-                0,
-                ( lh * np.sin(stateNED.mu)),
-            ],
-        )
-        poses.get_mutable_value().set_value(self.body_frame_id, body_pose)
-        poses.get_mutable_value().set_value(self.elevator_frame_id, elevator_pose)
-        # poses.get_mutable_value().set_value(self.perch_frame_id, self.X_perch_)
+        R_Brm = RollPitchYaw(np.pi/2, 0, np.pi/2).ToRotationMatrix()
+        p_Brm = [-0.013011, 0.25, 0]
+        X_Brm = RigidTransform(R_Brm, p_Brm)
+        
+        
+        R_Bre = RollPitchYaw(0, 0, -0.17453).ToRotationMatrix()
+        p_Bre = [-0.14351, 0.068516, 0]
+        X_Bre = RigidTransform(R_Bre, p_Bre)
+        
+        R_Ble = RollPitchYaw(0, 0, 0.17453).ToRotationMatrix()
+        p_Ble = [-0.14277, -0.073162, 0]    
+        X_Ble = RigidTransform(R_Ble, p_Ble)
+        
+              
+        left_motor_pose = X_DrB @ X_Blm @ RigidTransform(RotationMatrix.MakeZRotation(-full_state.delta_lm))
+        right_motor_pose = X_DrB @ X_Brm @ RigidTransform(RotationMatrix.MakeZRotation(full_state.delta_rm))
+        
+        left_elevon_pose = X_DrB @ X_Ble @ RigidTransform(RotationMatrix.MakeYRotation(full_state.delta_le))
+        right_elevon_pose = X_DrB @ X_Bre @ RigidTransform(RotationMatrix.MakeYRotation(full_state.delta_re))
+        
 
+        poses.get_mutable_value().set_value(self.body_frame_id, body_pose)
+        poses.get_mutable_value().set_value(self.right_motor_frame_id, right_motor_pose)
+        poses.get_mutable_value().set_value(self.left_motor_frame_id, left_motor_pose)
+        poses.get_mutable_value().set_value(self.rigth_elevon_frame_id, right_elevon_pose)
+        poses.get_mutable_value().set_value(self.left_elevon_frame_id, left_elevon_pose)
+        
     @staticmethod
-    def AddToBuilder(builder, glider_state_port, scene_graph):
+    def AddToBuilder(builder, fixedWing_state_port, scene_graph):
         assert builder
         assert scene_graph
 
         geom = builder.AddSystem(FixedWingGeometry(scene_graph))
-        builder.Connect(glider_state_port, geom.get_input_port(0))
+        builder.Connect(fixedWing_state_port, geom.get_input_port(0))
         builder.Connect(
             geom.get_output_port(0),
             scene_graph.get_source_pose_port(geom.source_id),

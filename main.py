@@ -7,15 +7,28 @@ import numpy as np
 
 import time
 
-PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation.urdf"
 
-# width of ground, lenght of ground,height of highest obstavle + 1. Look in urdf file
-CENTER_GROUND_XY = np.array([0, 5]) 
-GROUND_WIDTH = 7
-GROUND_LENGTH = 15
-OBST_HEIGHT = 2
+obstacle = 1
 
-OBSTACLE_SCALEFACTOR=1.3
+if obstacle == 0:
+    PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation.urdf"
+
+    # width of ground, lenght of ground,height of highest obstavle + 1. Look in urdf file
+    CENTER_GROUND_XY = np.array([0, 5]) 
+    GROUND_WIDTH = 7
+    GROUND_LENGTH = 15
+    OBST_HEIGHT = 2
+elif obstacle == 1:
+    
+    PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation_Large.urdf"
+    # width of ground, lenght of ground,height of highest obstavle + 1. Look in urdf file
+    CENTER_GROUND_XY = np.array([0, 9]) 
+    GROUND_WIDTH = 11
+    GROUND_LENGTH = 20
+    OBST_HEIGHT = 2
+    
+
+OBSTACLE_SCALEFACTOR= 2.4
 
 # trajectory
 KDIMENTIONS = 3
@@ -43,16 +56,16 @@ if __name__ == "__main__":
     sim.print_model_instances(simEnv.plant)
     print("################ FINISHED building environment model ################\n\n")
 
-    # Solve IRIS
+    # input("Press Enter to continue...")
+    
 
     print("################ Starting IRIS region computation ################\n")
     irisOptions = irisUtils.IrisWrapperOptions()
     irisOptions.use_CliqueCover = True
-    irisOptions.num_regions = 10
     irisOptions.obstacle_scale_factor = OBSTACLE_SCALEFACTOR
     irisOptions.seed = 0
-    irisOptions.region_file_path = "region_files/iris_regions"
-    irisOptions.clique_num_points = 200
+    irisOptions.region_file_path = "region_files/iris_regions_Large"
+    irisOptions.clique_num_points = 1000
     
     irisWrapper = irisUtils.IrisWrapper(irisOptions)    
     simEnv.compute_obstacles(irisWrapper)
@@ -95,9 +108,9 @@ if __name__ == "__main__":
     
     gcsTraj = gcsUtils.GCSTrajectory(KDIMENTIONS, options)
     start = [0, 0, 1]
-    goal = [0.5, 11.5, 1.5]
+    # goal = [0.5, 11.5, 1.5]
     # goal = [0, 10.5, 1.5]
-    # goal = [-1.5, 7.5, 1]
+    goal = [0.5, 18.5, 1]
     
     gcsTraj.add_start_goal_and_viz(start, goal, simEnv.meshcat, zero_deriv_boundary=None)
     gcsTraj.add_pathLengthCost(1000)

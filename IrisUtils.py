@@ -63,7 +63,7 @@ class IrisWrapper:
         uby = center_ground_xy[1] + ground_length/2.0
         
         self.lower_bound = np.array([lbx , lby, 0])             
-        self.upper_bound = np.array([ubx, uby, obst_height+1])      
+        self.upper_bound = np.array([ubx, uby, obst_height])      
         
         self.domain = pyOpt.HPolyhedron.MakeBox(self.lower_bound, self.upper_bound)
         
