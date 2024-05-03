@@ -345,7 +345,7 @@ class SimulationEnvironment():
             sample_times_s = sample_times_s[start_index:end_index+1]
 
             m = 1.54
-            g = 9.81
+            g = 9.80665
             
             self.meshcat.StartRecording()
 

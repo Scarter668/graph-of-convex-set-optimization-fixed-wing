@@ -13,7 +13,7 @@ REGION_FILE_PATH = "iris_regions"
 class IrisWrapperOptions:
     use_CliqueCover = False
     num_regions = 15
-    obstacle_scale_factor = 1.05
+    obstacle_offset_factor = 1.05
     seed = 0
     region_file_path = REGION_FILE_PATH
     
@@ -47,7 +47,7 @@ class IrisWrapper:
 
         self.use_CliqueCover = options.use_CliqueCover
         self.num_regions = options.num_regions
-        self.obstacle_scale_factor = options.obstacle_scale_factor
+        self.obstacle_scale_factor = options.obstacle_offset_factor
         self.region_file_path = options.region_file_path
         self.randomGen = RandomGenerator(options.seed)
         self.num_points = options.clique_num_points
@@ -79,7 +79,7 @@ class IrisWrapper:
     
     def solveIRIS(self):
         
-        iris_obstacles_scaled = [obstacle.Scale(self.obstacle_scale_factor) for obstacle in self.iris_obstacles]
+        iris_obstacles_scaled = [pyOpt.HPolyhedron(o.A(), o.b()+self.obstacle_scale_factor) for o in self.iris_obstacles]
         
         if self.iris_obstacles is None:
             raise ValueError("No obstacles to solve IRIS")

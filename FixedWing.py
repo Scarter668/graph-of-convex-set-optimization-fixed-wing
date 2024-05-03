@@ -128,8 +128,8 @@ def FixedWingPlant_(T):
             fullstate_dot.z = -np.sin(s.gamma) * s.v_a
             fullstate_dot.v_a = X_a/self.m - np.sin(s.gamma) * self.g
             
-            fullstate_dot.beta = np.sin(s.alpha)*s.p - np.cos(s.alpha)*s.r + (np.cos(s.gamma)*np.sin(s.mu)*self.m*self.g + Y_a )/(self.m*s.v_a)
-            fullstate_dot.alpha = s.q - (np.cos(s.alpha)*s.p + np.sin(s.alpha)*s.r)*np.tan(s.beta) +  (np.cos(s.gamma)*np.cos(s.mu)*self.g)/(np.cos(s.beta)*s.v_a) + Z_a/(np.cos(s.beta)*s.v_a*self.m)
+            fullstate_dot.beta = 0 # np.sin(s.alpha)*s.p - np.cos(s.alpha)*s.r + (np.cos(s.gamma)*np.sin(s.mu)*self.m*self.g + Y_a )/(self.m*s.v_a)
+            fullstate_dot.alpha = 0 #s.q - (np.cos(s.alpha)*s.p + np.sin(s.alpha)*s.r)*np.tan(s.beta) +  (np.cos(s.gamma)*np.cos(s.mu)*self.g)/(np.cos(s.beta)*s.v_a) + Z_a/(np.cos(s.beta)*s.v_a*self.m)
             
             fullstate_dot.chi = (-Z_a * np.sin(s.mu) + Y_a * np.cos(s.mu)) / (s.v_a * self.m * np.cos(s.mu))
             fullstate_dot.gamma = (-np.cos(s.gamma) * self.g * self.m - Y_a * np.sin(s.mu) - Z_a * np.cos(s.mu)) / (s.v_a * self.m)
@@ -170,8 +170,8 @@ def FixedWingPlant_(T):
             
             derivatives.get_mutable_vector().SetFromVector(fullstate_dot[:])
             
-            print("derivatives updated")
-            print("fullstate: ", fullstate[:])
+            # print("derivatives updated")
+            # print("fullstate: ", fullstate[:])
                     
         def forces_moments(self, x, u):
             # Unpack control inputs and state variables
@@ -272,7 +272,7 @@ def FixedWingPlant_(T):
                 vi_squared = (va * np.cos(alpha_rad))**2 + (2 * F_thrust_tot) / (rho * S_prop)
                 
                 vi = 0.5 * (np.sqrt(vi_squared) - va * np.cos(alpha_rad)) if vi_squared >= 0 else 0
-                
+                vi = 0
                 
                 # print("vi: ", vi)
             except Exception as e:
@@ -310,7 +310,7 @@ def FixedWingPlant_(T):
         def CopyStateOut(self, context, output):
             x = context.get_continuous_state_vector().CopyToVector()
             output.SetFromVector(x)
-            print("output updated")
+            # print("output updated")
 
         def OutputForces(self, context, output):
             # F, M = self.ComputeForces(context)
@@ -372,9 +372,11 @@ class FixedWingGeometry(LeafSystem):
         assert self.rigth_elevon_frame_id.is_valid()
         assert self.left_elevon_frame_id.is_valid()
         
-    
+
         
         full_state = FullState(self.get_input_port(0).Eval(context)) 
+        # print(f"alpha: {full_state.alpha} beta: {full_state.beta}")# gamma: {full_state.gamma} mu: {full_state.mu} p: {full_state.p} q: {full_state.q} r: {full_state.r} delta_le: {full_state.delta_le} delta_re: {full_state.delta_re} delta_lm: {full_state.delta_lm} delta_rm: {full_state.delta_rm}")
+
         
         stateNED = fi.FixedWingStatesNED(full_state[:NUM_STATES])
         
@@ -414,7 +416,7 @@ class FixedWingGeometry(LeafSystem):
         poses.get_mutable_value().set_value(self.rigth_elevon_frame_id, right_elevon_pose)
         poses.get_mutable_value().set_value(self.left_elevon_frame_id, left_elevon_pose)
         
-        print("body_pose: ", body_pose)
+        # print("body_pose: ", body_pose)
         
     @staticmethod
     def AddToBuilder(builder, fixedWing_state_port, scene_graph):

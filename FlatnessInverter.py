@@ -261,6 +261,7 @@ def Extract_R_BA(statesNED):
     
     if type(s.alpha) != float:
         R_BA = Ry(-s.alpha) @ Rz(s.beta)
+        # print("used non drake rotation")
     else:
         R_BA = RotationMatrix.MakeYRotation(-s.alpha) @ RotationMatrix.MakeZRotation(s.beta)
     
@@ -271,7 +272,8 @@ def Extract_R_OA(statesNed):
     s = FixedWingStatesNED(statesNed)
     
     if type(s.mu) != float:
-        R_OA = Ry(s.mu) @ Rz(s.gamma) @ Rx(s.chi)
+        R_OA = Rz(s.chi) @ Ry(s.gamma) @ Rx(s.mu)
+        # print("used non drake rotation")
     
     else:
         R_OA = RollPitchYaw(s.mu, s.gamma, s.chi).ToRotationMatrix()

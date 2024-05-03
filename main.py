@@ -8,7 +8,7 @@ import numpy as np
 import time
 
 
-obstacle = 1
+obstacle = 0
 
 if obstacle == 0:
     PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation.urdf"
@@ -17,7 +17,7 @@ if obstacle == 0:
     CENTER_GROUND_XY = np.array([0, 5]) 
     GROUND_WIDTH = 7
     GROUND_LENGTH = 15
-    OBST_HEIGHT = 2
+    OBST_HEIGHT = 3
 elif obstacle == 1:
     
     PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation_Large.urdf"
@@ -28,7 +28,7 @@ elif obstacle == 1:
     OBST_HEIGHT = 2
     
 
-OBSTACLE_SCALEFACTOR= 2.4
+PLANE_WIDTH = 1
 
 # trajectory
 KDIMENTIONS = 3
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     
     print("################ Building environment model ################\n")
     simEnv = sim.SimulationEnvironment(obstacle_load_path=PATH_TO_OBSTACLE_ENV)
-    # simEnv.connect_meshcat()
+    simEnv.connect_meshcat()
     simEnv.build_model()
     simEnv.save_and_display_diagram()
     sim.print_model_instances(simEnv.plant)
@@ -61,22 +61,22 @@ if __name__ == "__main__":
 
     print("################ Starting IRIS region computation ################\n")
     irisOptions = irisUtils.IrisWrapperOptions()
-    irisOptions.use_CliqueCover = True
-    irisOptions.obstacle_scale_factor = OBSTACLE_SCALEFACTOR
-    irisOptions.seed = 0
-    irisOptions.region_file_path = "region_files/iris_regions_Large"
+    irisOptions.use_CliqueCover = False
     irisOptions.clique_num_points = 1000
+    irisOptions.obstacle_offset_factor = PLANE_WIDTH/2.0
+    irisOptions.seed = 0
+    irisOptions.region_file_path = "region_files/iris_regions"
+    irisOptions.num_regions = 20
     
     irisWrapper = irisUtils.IrisWrapper(irisOptions)    
     simEnv.compute_obstacles(irisWrapper)
     irisWrapper.determine_and_set_domain(CENTER_GROUND_XY, GROUND_WIDTH, GROUND_LENGTH, OBST_HEIGHT)    
     
-    # irisWrapper.add_meshVisualization_iris_obstacles(simEnv.meshcat, is_visible=True)
-    # irisWrapper.add_meshVisualization_iris_domain(simEnv.meshcat, is_visible=True)
+    irisWrapper.add_meshVisualization_iris_obstacles(simEnv.meshcat, is_visible=True)
+    irisWrapper.add_meshVisualization_iris_domain(simEnv.meshcat, is_visible=True)
     
     
-    if irisWrapper.load_regions_from_file() is None:
-            
+    if irisWrapper.load_regions_from_file() is None: 
         irisWrapper.solveIRIS()
         irisWrapper.save_regions_to_file()
     
@@ -85,9 +85,10 @@ if __name__ == "__main__":
     
     print("################ FINISHED IRIS computation ################\n\n")
     
+  
     # Save the regions to a file
     
-    
+    input("Press Enter to continue...")
     
     print("################ Solving GCS trajectory ################\n")
     options = gcsUtils.GCSTrajectoryOptions()
@@ -109,8 +110,8 @@ if __name__ == "__main__":
     gcsTraj = gcsUtils.GCSTrajectory(KDIMENTIONS, options)
     start = [0, 0, 1]
     # goal = [0.5, 11.5, 1.5]
-    # goal = [0, 10.5, 1.5]
-    goal = [0.5, 18.5, 1]
+    goal = [0, 10.5, 1.5]
+    # goal = [0.5, 18.5, 1]
     
     gcsTraj.add_start_goal_and_viz(start, goal, simEnv.meshcat, zero_deriv_boundary=None)
     gcsTraj.add_pathLengthCost(1000)
@@ -137,6 +138,7 @@ if __name__ == "__main__":
     simulator.connect_meshcat()
     simulator.add_fixed_wing()
     simulator.add_controller(gcsTraj.trajectory.value(6))
+    simulator.add_constant_inputSource([0,0,0,0])
     simulator.build_model()
     simulator.save_and_display_diagram()
     
