@@ -26,6 +26,7 @@ from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
 from pydrake.multibody.parsing import Parser
 
 from pydrake.systems.framework import DiagramBuilder
+from pydrake.systems.primitives import ConstantVectorSource
 from pydrake.systems.controllers import FiniteHorizonLinearQuadraticRegulatorOptions, MakeFiniteHorizonLinearQuadraticRegulator
 # from underactuated import ConfigureParser
 
@@ -38,8 +39,9 @@ import IrisUtils as irisUtils
 from pydrake.all import (
     Simulator,
     BodyIndex, 
-    ModelInstanceIndex
+    ModelInstanceIndex,
 )
+
 
 
 from IPython.display import SVG, display
@@ -125,6 +127,13 @@ class SimulationEnvironment():
             return
         
         raise ValueError("Invalid plant type")
+    
+    
+    def add_constant_inputSource(self, value):
+        if PLANT_TYPE == FIXED_WING:
+            vsource = self.builder.AddSystem(ConstantVectorSource(value))
+            self.builder.Connect(vsource.get_output_port(), self.fixed_plane.get_input_port(0))
+            
     
     def add_controller(self, point=None):
         

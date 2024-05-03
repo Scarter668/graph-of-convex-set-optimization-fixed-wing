@@ -16,7 +16,7 @@ import GeometryUtils as pyGeo
 # Implemented in accordance with notation from https://thesis.unipd.it/retrieve/a2c7ed88-c8a9-47ad-8a4c-798b2a4c345e/Pasquali_Monika.pdf
 
 FixedWingStatesNED = namedview(
-    "FixedWingNStatesNED", ["x", "y", "z", "v_a", "betha", "alpha", "chi", "gamma", "mu", "p", "q", "r"]
+    "FixedWingNStatesNED", ["x", "y", "z", "v_a", "beta", "alpha", "chi", "gamma", "mu", "p", "q", "r"]
 )
 
 # Center of gravity of the aircraft
@@ -66,7 +66,7 @@ def UnflattenFixedWingStatesNED(p_Dr,dp_Dr,ddp_Dr,dddp_Dr, ddddp_Dr, m, g):
     
     s.v_a = np.sqrt( dp.T @ dp) 
     
-    s.betha = 0 #np.arctan2(dp_n.z, dp_n.x) # assumed 0 for fixed wing
+    s.beta = 0 #np.arctan2(dp_n.z, dp_n.x) # assumed 0 for fixed wing
     
     s.alpha = 0 #np.arctan2(dp_n.y, s.v_a) # assumed 0 for now  # np.arctan2(dx[2], dx[0])
     
@@ -212,7 +212,7 @@ def UnflattenFixedWingStatesNED(p_Dr,dp_Dr,ddp_Dr,dddp_Dr, ddddp_Dr, m, g):
     
     sdot[0:3] = dp
     sdot.v_a = dv_a
-    sdot.betha = 0
+    sdot.beta = 0
     sdot.alpha = 0
     sdot.gamma = dgamma
     sdot.chi = dchi
@@ -232,16 +232,13 @@ def UnflattenFixedWingStatesNED(p_Dr,dp_Dr,ddp_Dr,dddp_Dr, ddddp_Dr, m, g):
 
 def ExtractTransformationNED(statesNED):
     
-    s = FixedWingStatesNED(statesNED)
-    R_OA = RollPitchYaw(s.mu, s.gamma, s.chi).ToRotationMatrix()
+    R_OB = Extract_R_OB(statesNED)  
     
-    R_BA = RotationMatrix.MakeYRotation(-s.alpha) @ RotationMatrix.MakeZRotation(s.betha)
+    if type(R_OB) == np.ndarray:
+        X_IB = RigidTransform(RotationMatrix(R_OB), statesNED[0:3])
     
-    R_OB = R_OA @ R_BA.transpose()  
-    
-    
-    # R_OB = R_IB
-    X_IB = RigidTransform(R_OB, s[0:3])
+    else:
+        X_IB = RigidTransform(R_OB, statesNED[0:3])
     
     return X_IB
     
@@ -256,3 +253,53 @@ def ExtractTransformation(statesNED):
     X_DrB = X_DrI @ X_IB
     
     return X_DrB
+
+
+def Extract_R_BA(statesNED):
+    
+    s = FixedWingStatesNED(statesNED)
+    
+    if type(s.alpha) != float:
+        R_BA = Ry(-s.alpha) @ Rz(s.beta)
+    else:
+        R_BA = RotationMatrix.MakeYRotation(-s.alpha) @ RotationMatrix.MakeZRotation(s.beta)
+    
+    return R_BA
+
+def Extract_R_OA(statesNed):
+        
+    s = FixedWingStatesNED(statesNed)
+    
+    if type(s.mu) != float:
+        R_OA = Ry(s.mu) @ Rz(s.gamma) @ Rx(s.chi)
+    
+    else:
+        R_OA = RollPitchYaw(s.mu, s.gamma, s.chi).ToRotationMatrix()
+    
+    return R_OA
+
+def Extract_R_OB(statesNed):
+    
+    R_OA = Extract_R_OA(statesNed)
+    
+    R_BA = Extract_R_BA(statesNed)
+    
+    R_OB = R_OA @ R_BA.transpose()
+    
+    return R_OB
+
+
+
+def Rz(theta):
+    return np.array([[np.cos(theta), -np.sin(theta), 0],
+                     [np.sin(theta), np.cos(theta), 0],
+                     [0, 0, 1]])
+
+def Ry(theta):
+    return np.array([[np.cos(theta), 0, np.sin(theta)],
+                     [0, 1, 0],
+                     [-np.sin(theta), 0, np.cos(theta)]])
+def Rx(theta):
+    return np.array([[1, 0, 0],
+                     [0, np.cos(theta), -np.sin(theta)],
+                     [0, np.sin(theta), np.cos(theta)]])

@@ -1,0 +1,182 @@
+function[F,M,IMat,m] = forces_moments(x,u)
+    delta_el = u(1); # left elevon deflection angle
+    delta_er = u(2); # right elevon deflection angle
+    w_l = u(3); # left propeller angular rate (PWM)
+    w_r = u(4); # right propeller angular rate (PWM)
+    po_x = x(1); # x coordinate position in Earth frame
+    po_y = x(2); # y coordinate position in Earth frame
+    po_z = x(3); # z coordinate position in Earth frame
+    vb_x = x(4); # vx coordinate speed in Body frame
+    vb_y = x(5); # vy coordinate speed in Body frame
+    vb_z = x(6); # vz coordinate speed in Body frame
+
+    ## Compute air data
+    va = sqrt(vb_xˆ2+vb_yˆ2+vb_zˆ2); # aerodynamic speed
+    alpha_rad = atan2(vb_z,vb_x); # angle of attack
+    alpha_deg = alpha_rad/pi*180;
+    beta_rad = atan2(vb_y,va); # side-slip angle
+    beta_deg = beta_rad/pi*180;
+
+    bRa = Ry(-alpha_rad)*Rz(beta_rad); # rotation matrix from Aerodynamic to Body frame
+
+    # Modified Rodrigues Parameters
+    sig_vec = x(7:9);
+    sig1 = sig_vec(1);
+    sig2 = sig_vec(2);
+    sig3 = sig_vec(3);
+
+    ## Rotation matrix with MRP
+    norm_sig_squared = sig_vec’*sig_vec;
+    sig_sqew = [0 -sig3 sig2; sig3 0 -sig1; -sig2 sig1 0];
+    bRo = eye(3)+1/(1+norm_sig_squared)ˆ2*(8*sig_sqew*sig_sqew-4*(1-norm_sig_squared)*sig_sqew);
+
+
+    ## Roll, pitch and yaw angular rates
+    p = x(10);
+    q = x(11);
+    r = x(12);
+
+    ## Parameters
+    m = 1.56; # (kg) full weight of the delta-wing
+    g = 9.80665; # (m/sˆ2) gravitational acceleration
+    Ixx=.1147; # (kg*mˆ2) (Zagi flying wing)
+    Iyy=.0576; # (kg*mˆ2) (Zagi flying wing)
+    Izz=.1712; # (kg*mˆ2) (Zagi flying wing)
+    Ixz=.0015; # (kg*mˆ2) (Zagi flying wing)
+    IMat = [Ixx 0 -Ixz;0 Iyy 0;-Ixz 0 Izz];
+
+    rho = 1.225; # (kg/mˆ3) (density of the air)
+    mu = 1.81e-5; # (kg/m/s) (dynamic viscosity of the air at 15 )
+    nu = mu/rho; # (mˆ2/s) (kinematic viscosity of the air at 15 )
+
+    S = 0.2589; # (mˆ2) surface of the delta-wing
+    S_w = 1/2*S; # wet area
+    c = 0.3302; # (m) mean chord
+    b = 1.4224; # (m) tip to tip length of the wings
+    l_motor = b/4; # distance from motor to Oxb axis
+    S_prop = 0.0314; # (mˆ2)
+    k_motor = 40;
+    k_T_p = 1e-6; # maximum 1 Nm torque
+    k_omega = 1e3; # maximum 2000 rad/s
+
+    ## Lift sigmoid function parameters
+    Re0 = 16e4;
+    pow_coef = .15;
+    e = 0.8; # Oswald efficiency factor
+
+    ## Aerodynamic coefficients for Zagi flying wing
+    # Longitudinal aerodynamics
+    C_L_0 = 0;
+    C_D_0 = 0;
+    C_m_0 = 0;
+    C_L_alpha = 3.5016;
+    C_D_alpha = .2108;
+    C_m_alpha = -.5675;
+    C_L_q = 2.8932;
+    C_D_q = 0;
+    C_m_q = -1.3990;
+    C_L_delta_e = .2724;
+    C_D_delta_e = .3045;
+    C_m_delta_e = -.3254;
+    C_prop = 1;
+
+    # Lateral aerodynamics
+    C_Y_0 = 0;
+    C_l_0 = 0;
+    C_n_0 = 0;
+    C_Y_beta = -.07359;
+    C_l_beta = -.02854;
+    C_n_beta = -.00040;
+    C_Y_p = 0;
+    C_l_p = -.3209;
+    C_n_p = -.01297;
+    C_Y_r = 0;
+    C_l_r = .03066;
+    C_n_r = -.00434;
+    C_Y_delta_a = 0;
+    C_l_delta_a = .1682;
+    C_n_delta_a = -.00328;
+
+    ## Forces
+    # coeffL defined in "Lift aerodynamic coefficient versus the angle of attack"
+    coeffD = C_D_0+C_D_alpha*abs(alpha_rad);
+    coeffM = C_m_0+C_m_alpha*alpha_rad;
+
+    Fa_ra_x = ((rho*S)/2)*(coeffD*vaˆ2+(C_D_q*c*q*va)/(2)+C_D_delta_e*(abs( delta_el)+abs(delta_er))*vaˆ2); # drag force due to va
+    Fa_ra_z = ((rho*S)/2)*(coeffL*vaˆ2+C_L_q*c*q*va/(2)+C_L_delta_e*(delta_el+ delta_er)*vaˆ2); # lift force due to va
+    Fa_ra_y = ((rho*S)/2)*(C_Y_0*vaˆ2+C_Y_beta*beta_rad*vaˆ2+C_Y_p*b*r*va*p/(2)+C_Y_delta_a*(delta_el-delta_el)*vaˆ2); # lateral force due to va
+
+    Fthl_rb_x = rho*S_prop*C_prop*((k_motor*w_l)ˆ2-vaˆ2)/2; # thrust force due to the left propeller
+    Fthr_rb_x = rho*S_prop*C_prop*((k_motor*w_r)ˆ2-vaˆ2)/2; # thrust force due to the right propeller
+    F_thrust_tot = Fthl_rb_x+Fthr_rb_x; # total thrust force
+
+    if (va*cos(alpha_rad))ˆ2+(2*(F_thrust_tot))/(rho*S_prop) >= 0  # Will only be true for hover flight
+        vi = 1/2*(sqrt((va*cos(alpha_rad))ˆ2+(2*(F_thrust_tot))/(rho*S_prop))- va*cos(alpha_rad)); # due to wing propeller interaction
+    else
+        vi = 0;
+    end
+
+
+    Fa_ra_x_vi = ((rho*S_w)/2)*(C_D_delta_e*(abs(delta_el)+abs(delta_er))*viˆ2); # drag force due to vi
+
+    Fa_ra_z_vi = ((rho*S_w)/2)*(C_L_delta_e*(delta_el+delta_er)*viˆ2); # lift force due to vi
+
+    F_aero_A_va = [-Fa_ra_x Fa_ra_y -Fa_ra_z]’;
+    F_aero_vi = [-Fa_ra_x_vi 0 -Fa_ra_z_vi]’;
+    F = F_aero_vi +bRa*F_aero_A_va;
+    F = F + [Fthl_rb_x+Fthr_rb_x 0 0]’+bRo*[0;0;m*g]; # total force vector
+
+    ## Moments
+    C_L_simplified_va = C_l_0*vaˆ2+C_l_beta*beta_rad*vaˆ2+(C_l_p*b*p*va)/(2)+( C_l_r*b*r*va)/(2)+C_l_delta_a*(delta_el-delta_er)*vaˆ2;
+
+    C_M_simplified_va = coeffM*vaˆ2+(C_m_q*c*q*va)/(2)+(C_m_delta_e)*(delta_el+ delta_er)*vaˆ2;
+
+    C_N_simplified_va = C_n_0*vaˆ2+C_n_beta*beta_rad*vaˆ2+C_n_p*b*va/(2)*p+ C_n_r*b*va/(2)*p+C_n_delta_a*(delta_el-delta_er)*vaˆ2;
+
+    coeff_vector = [C_L_simplified_va C_M_simplified_va C_N_simplified_va]’;
+    tau_ab = 1/2*rho*S*c*coeff_vector; # moment due to the aerodynamic effects
+
+    M_t_b = [k_T_p*(k_omega*w_l)ˆ2-k_T_p*(k_omega*w_r)ˆ2; 0; 0]; # moment induced by the propellers
+
+    M_p_b = [0;0;l_motor*(Fthl_rb_x-Fthr_rb_x)]; # moment induced by propulsion force
+
+    C_M_vi = (C_m_delta_e)*(delta_el+delta_er)*viˆ2; # torques generated by the propeller wing interaction
+    M_prop = 1/2*rho*S_w*c*[0;C_M_vi;0];
+    M_elevon_lift = b/4 * [rho*S_w/2*(C_L_delta_e*(delta_el-delta_er)*viˆ2);0;0];
+
+    M = M_t_b + M_prop + M_p_b + tau_ab + M_elevon_lift; # total torque vector
+
+end
+
+
+function [coeffL] = coeffLf(alpha_deg)
+
+    alpha_rad = alpha_deg/180*pi;
+    va = 5;
+    c = 0.3302;
+    nu = 1.4776e-05;
+    Re = va*c/nu;
+
+    # Lift sigmoid function parameters
+    alpha0_deg = 9;
+    Re0 = 16e4;
+    pow_coef = 0.15;
+
+    # Lift coefficients
+    c1_lift = 4.9781;
+    c2_lift = 1.015;
+
+    alpha_0_Re = alpha0_deg*(Re/Re0)ˆpow_coef;
+    if (abs(alpha_deg)<=alpha_0_Re) || (abs(alpha_deg)>=180-alpha_0_Re)
+        CL1 = c1_lift*sin(2*abs(alpha_rad));
+        CL2 = 0;
+    elseif (abs(alpha_deg)>alpha_0_Re) && (abs(alpha_deg)<180-alpha_0_Re)
+        CL1 = 0;
+        CL2 = c2_lift*sin(2*abs(alpha_rad));
+    else
+        CL1 = 0;
+        CL2 = 0;
+    end
+    sigmoide = 1/(1+exp(abs(alpha_deg) - alpha_0_Re)) + 1/(1+exp(180-abs( alpha_deg) - alpha_0_Re));
+    coeffL = sign(alpha_deg) * (CL1*sigmoide+CL2*(1 - sigmoide));
+end
