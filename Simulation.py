@@ -52,6 +52,8 @@ import PerchingPlane as pp
 import FixedWing as fw
 import FlatnessInverter as fi
 import GeometryUtils as geoUtils
+import gcs
+import gcs.bezier
 
 
 FIXED_WING = 0
@@ -305,7 +307,7 @@ class SimulationEnvironment():
             if trajectory is None:
                 raise ValueError("Trajectory is required for fixed wing simulation")
 
-            num_timesteps = 100
+            num_timesteps = 200
             num_dofs = 3
             p_numeric = np.empty((num_timesteps, num_dofs))
             dp_numeric = np.empty((num_timesteps, num_dofs))
@@ -320,12 +322,15 @@ class SimulationEnvironment():
             velocity_magnitudes = np.empty(num_timesteps)
 
             for i, t in enumerate(sample_times_s):
+                
                 p_numeric[i] = trajectory.value(t).flatten()
                 dp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=1).flatten()
                 ddp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=2).flatten()
-                dddp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=3).flatten()
-                ddddp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=4).flatten()
                 velocity_magnitudes[i] = np.sqrt(np.sum(dp_numeric[i]**2))
+                
+                if type(trajectory) != gcs.bezier.BezierTrajectory:    
+                    dddp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=3).flatten()
+                    ddddp_numeric[i] = trajectory.EvalDerivative(t, derivative_order=4).flatten()
 
             # Find indices where the velocity is not zero
             non_zero_velocity_indices = np.where(velocity_magnitudes > 0)[0]

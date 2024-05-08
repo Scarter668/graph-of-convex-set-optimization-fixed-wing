@@ -8,7 +8,7 @@ import numpy as np
 import time
 
 
-obstacle = 0
+obstacle = 2
 
 if obstacle == 0:
     PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation.urdf"
@@ -26,18 +26,24 @@ elif obstacle == 1:
     GROUND_WIDTH = 11
     GROUND_LENGTH = 20
     OBST_HEIGHT = 2
-    
+
+elif obstacle == 2:
+    PATH_TO_OBSTACLE_ENV = "models/obstacles.urdf"
+    CENTER_GROUND_XY = np.array([0, 9]) 
+    GROUND_WIDTH = 11
+    GROUND_LENGTH = 20
+    OBST_HEIGHT = 2    
 
 PLANE_WIDTH = 1
 
 # trajectory
 KDIMENTIONS = 3
-VEL_LOWER_BOUND = np.ones(KDIMENTIONS) * -2
-VEL_UPPER_BOUND =  np.ones(KDIMENTIONS) * 2 #np.array([100000, 100000, 100000])
+VEL_LOWER_BOUND = np.ones(KDIMENTIONS) * -.8
+VEL_UPPER_BOUND =  np.ones(KDIMENTIONS) * .8 #np.array([100000, 100000, 100000])
 
 START_VELOCITY_LB = np.array([0.8, 0.8, 0.1])
 # START_VELOCITY_LB = np.array([-0.8, -0.4, -0.01])
-GOAL_VELOCITY_LB = np.array([0.1, 0.2, 0.1])
+GOAL_VELOCITY_LB = VEL_LOWER_BOUND #np.array([-0.1, 0.2, -0.1])
 
 
 
@@ -62,10 +68,13 @@ if __name__ == "__main__":
     print("################ Starting IRIS region computation ################\n")
     irisOptions = irisUtils.IrisWrapperOptions()
     irisOptions.use_CliqueCover = False
-    irisOptions.clique_num_points = 1000
-    irisOptions.obstacle_offset_factor = PLANE_WIDTH/2.0
+    irisOptions.clique_num_points = 500
+    irisOptions.obstacle_offset_factor = 0.2 # PLANE_WIDTH/2.0
     irisOptions.seed = 0
-    irisOptions.region_file_path = "region_files/iris_regions"
+    if irisOptions.use_CliqueCover:
+        irisOptions.region_file_path = f"region_files/iris_regions_obst_p{irisOptions.clique_num_points}"
+    else:
+        irisOptions.region_file_path = f"region_files/iris_regions_obst_NOCLIQUE"
     irisOptions.num_regions = 20
     
     irisWrapper = irisUtils.IrisWrapper(irisOptions)    
@@ -75,8 +84,9 @@ if __name__ == "__main__":
     irisWrapper.add_meshVisualization_iris_obstacles(simEnv.meshcat, is_visible=True)
     irisWrapper.add_meshVisualization_iris_domain(simEnv.meshcat, is_visible=True)
     
-    
-    if irisWrapper.load_regions_from_file() is None: 
+    regions = irisWrapper.load_regions_from_file() 
+    # regions = None
+    if regions is None: 
         irisWrapper.solveIRIS()
         irisWrapper.save_regions_to_file()
     
@@ -86,7 +96,8 @@ if __name__ == "__main__":
     print("################ FINISHED IRIS computation ################\n\n")
     
   
-    # Save the regions to a file
+    
+
     
     input("Press Enter to continue...")
     
@@ -94,8 +105,8 @@ if __name__ == "__main__":
     options = gcsUtils.GCSTrajectoryOptions()
     options.use_BezierGCS = False
     options.regions = irisWrapper.iris_regions
-    options.path_continuity_order = 4 # 3 works
-    options.Bspline_order = 5   # 4 works
+    options.path_continuity_order = 4 # 3 works for Bezier
+    options.Bspline_order = 5   # 4 works for Bezier
     # options.edges = None
 
     options.start_velocity_lb = START_VELOCITY_LB
@@ -109,16 +120,26 @@ if __name__ == "__main__":
     
     gcsTraj = gcsUtils.GCSTrajectory(KDIMENTIONS, options)
     start = [0, 0, 1]
-    # goal = [0.5, 11.5, 1.5]
-    goal = [0, 10.5, 1.5]
-    # goal = [0.5, 18.5, 1]
+    goal1 = [0.5, 11.5, 1.5]
+    goal2 = [0, 10.5, 1.5]
+    goal3 = [0.5, 17.5, 1]
+    goal4 = [-2, 6.5, 1.5]
+    goal5 = [-3, 12, 0.5]
+    goal6 = [-3, 17.5, 1.2]
+    goal7 = [4.5, 17.5, .5]
     
+    goal8 = [3.5, 18.5, .5]
+    goal =  goal8
+    
+        
     gcsTraj.add_start_goal_and_viz(start, goal, simEnv.meshcat, zero_deriv_boundary=None)
     gcsTraj.add_pathLengthCost(1000)
     gcsTraj.add_timeCost(10)
     gcsTraj.add_velocityBounds(VEL_LOWER_BOUND, VEL_UPPER_BOUND)
     gcsTraj.add_continuityContraint()
     
+    
+    input("Press Enter to continue...")
     
     # input("Press Enter to solve the trajectory...")
     if gcsTraj.load_trajectory_from_file() is None:

@@ -112,7 +112,7 @@ class GCSTrajectory():
         geoUtils.visualize_point(meshcat,
                               start,
                               label="Gcs/source",
-                              radius=0.05, 
+                              radius=0.1, 
                               color=pyGeo.Rgba(0, 1, 0, 1), #Green
                               visible=is_visible)
         

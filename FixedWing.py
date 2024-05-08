@@ -120,6 +120,7 @@ def FixedWingPlant_(T):
             M_b = M[1]
             N_b = M[2]
             
+            # print(f"X_a: {X_a} \nY_a: {Y_a} \nZ_a: {Z_a} \nL_b: {L_b} \nM_b: {M_b} \nN_b: {N_b}")
             
             fullstate_dot = FullState(fullstate[:])
             
@@ -127,6 +128,8 @@ def FixedWingPlant_(T):
             fullstate_dot.y = np.sin(s.chi) * np.cos(s.gamma) * s.v_a
             fullstate_dot.z = -np.sin(s.gamma) * s.v_a
             fullstate_dot.v_a = X_a/self.m - np.sin(s.gamma) * self.g
+            
+            print(f"fullstate.z: {fullstate.z}")
             
             fullstate_dot.beta = 0 # np.sin(s.alpha)*s.p - np.cos(s.alpha)*s.r + (np.cos(s.gamma)*np.sin(s.mu)*self.m*self.g + Y_a )/(self.m*s.v_a)
             fullstate_dot.alpha = 0 #s.q - (np.cos(s.alpha)*s.p + np.sin(s.alpha)*s.r)*np.tan(s.beta) +  (np.cos(s.gamma)*np.cos(s.mu)*self.g)/(np.cos(s.beta)*s.v_a) + Z_a/(np.cos(s.beta)*s.v_a*self.m)
@@ -145,7 +148,6 @@ def FixedWingPlant_(T):
             denom3 = s.v_a *self.m * np.cos(s.beta)
             denom4 = s.v_a * self.m * np.cos(s.gamma)
             
-
             fullstate_dot.mu = (mu_dot_num1 / denom1) + (mu_dot_num2 / denom2) - (mu_dot_num3 / denom3) + (mu_dot_num4 / denom4)       
             
             fullstate_dot.p = (
@@ -159,13 +161,13 @@ def FixedWingPlant_(T):
             fullstate_dot.r = ( ((self.Ixz**2 + self.Ixx * (self.Ixx - self.Iyy)) * s.p 
             -self.Ixz * (self.Ixx - self.Iyy + self.Izz) * s.r ) * s.q + 
             self.Ixx * N_b + self.Ixz * L_b) / (self.Ixx * self.Izz - self.Ixz**2)
-            
             # lowpassfilter with time constant 0.01
             lmbda = 1
             fullstate_dot.delta_le = -lmbda*fullstate.delta_le + delta_le 
             fullstate_dot.delta_re = -lmbda*fullstate.delta_re + delta_re
             fullstate_dot.delta_lm = w_lm
             fullstate_dot.delta_rm = w_rm
+        
         
             
             derivatives.get_mutable_vector().SetFromVector(fullstate_dot[:])
@@ -212,6 +214,7 @@ def FixedWingPlant_(T):
             mu = self.mu
             nu = self.nu
             S = self.S
+            S_w = 0.5*S
             c = self.c
             b = self.b
             l_motor = self.l_motor
@@ -257,7 +260,9 @@ def FixedWingPlant_(T):
 
             # Forces due to aerodynamics
             coeffD = C_D_0 + C_D_alpha * np.abs(alpha_rad)
+            coeffM = C_m_0 + C_m_alpha * alpha_rad
             coeffL = coeffLf(alpha_rad)
+            
             Fa_ra_x = rho * S / 2 * (coeffD * va**2 + (C_D_q * c * q * va) / 2 + C_D_delta_e * (np.abs(delta_el) + np.abs(delta_er)) * va**2)
             Fa_ra_z = rho * S / 2 * (coeffL * va**2 + C_L_q * c * q * va / 2 + C_L_delta_e * (delta_el + delta_er) * va**2)
             Fa_ra_y = rho * S / 2 * (C_Y_0 * va**2 + C_Y_beta * beta_rad * va**2 + C_Y_p * b * r * va * p / 2 + C_Y_delta_a * (delta_el - delta_er) * va**2)
@@ -267,20 +272,28 @@ def FixedWingPlant_(T):
             Fthr_rb_x = rho * S_prop * C_prop * ((k_motor * w_r)**2 - va**2) / 2
             F_thrust_tot = Fthl_rb_x + Fthr_rb_x
 
-            try:
+            # print(f"Fthl_rb_x: {Fthl_rb_x}")
+            # print(f"F_thrust_tot: {F_thrust_tot}")
+            # try:
                 # Induced velocity by the propellers
-                vi_squared = (va * np.cos(alpha_rad))**2 + (2 * F_thrust_tot) / (rho * S_prop)
-                
-                vi = 0.5 * (np.sqrt(vi_squared) - va * np.cos(alpha_rad)) if vi_squared >= 0 else 0
-                vi = 0
-                
-                # print("vi: ", vi)
-            except Exception as e:
-                print("Error in vi: ", e)
-                vi = 0
+            vi_squared = (va * np.cos(alpha_rad))**2 + (2 * F_thrust_tot) / (rho * S_prop)
             
-            Fa_ra_x_vi = rho * S / 2 * C_D_delta_e * (np.abs(delta_el) + np.abs(delta_er)) * vi**2
-            Fa_ra_z_vi = rho * S / 2 * C_L_delta_e * (delta_el + delta_er) * vi**2
+            vi = 0.5 * (np.sqrt(vi_squared) - va * np.cos(alpha_rad)) #if vi_squared >= 0 else 0
+            vi = 0
+            
+            # print("vi_squared: ", vi_squared)
+    
+    
+            # except Exception as e:
+                # print("Error in vi: ", e)
+                # vi = 0
+                
+            # vi = va
+            # print(f"vi: {vi}")
+            # print(f"va: {va}")
+            
+            Fa_ra_x_vi = rho * S_w / 2 * C_D_delta_e * (np.abs(delta_el) + np.abs(delta_er)) * vi**2
+            Fa_ra_z_vi = rho * S_w / 2 * C_L_delta_e * (delta_el + delta_er) * vi**2
 
             # Total aerodynamic forces
             F_aero_A_va = np.array([-Fa_ra_x, Fa_ra_y, -Fa_ra_z])
@@ -289,9 +302,10 @@ def FixedWingPlant_(T):
 
             # Moments
             C_L_simplified_va = C_l_0 * va**2 + C_l_beta * beta_rad * va**2 + (C_l_p * b * p * va) / 2 + (C_l_r * b * r * va) / 2 + C_l_delta_a * (delta_el - delta_er) * va**2
-            C_M_simplified_va = coeffL * va**2 + (C_m_q * c * q * va) / 2 + C_m_delta_e * (delta_el + delta_er) * va**2
-            C_N_simplified_va = C_n_0 * va**2 + C_n_beta * beta_rad * va**2 + C_n_p * b * va / 2 * p + C_n_r * b * va / 2 * r + C_n_delta_a * (delta_el - delta_er) * va**2
-
+            C_M_simplified_va = coeffM * va**2 + (C_m_q * c * q * va) / 2 + C_m_delta_e * (delta_el + delta_er) * va**2
+            C_N_simplified_va = C_n_0 * va**2 + C_n_beta * beta_rad * va**2 + C_n_p * b * va / 2 * p + C_n_r * b * va / 2 * p + C_n_delta_a * (delta_el - delta_er) * va**2
+            # changed one p to r 
+            
             coeff_vector = np.array([C_L_simplified_va, C_M_simplified_va, C_N_simplified_va])
             tau_ab = 0.5 * rho * S * c * coeff_vector
 
@@ -299,12 +313,12 @@ def FixedWingPlant_(T):
             M_p_b = np.array([0, 0, l_motor * (Fthl_rb_x - Fthr_rb_x)])
 
             C_M_vi = C_m_delta_e * (delta_el + delta_er) * vi**2
-            M_prop = 0.5 * rho * S * c * np.array([0, C_M_vi, 0])
-            M_elevon_lift = b / 4 * np.array([rho * S / 2 * (C_L_delta_e * (delta_el - delta_er) * vi**2), 0, 0])
+            M_prop = 0.5 * rho * S_w * c * np.array([0, C_M_vi, 0])
+            M_elevon_lift = b / 4.0 * np.array([rho * S_w / 2 * (C_L_delta_e * (delta_el - delta_er) * vi**2), 0, 0])
 
             M = M_t_b + M_prop + M_p_b + tau_ab + M_elevon_lift
 
-            return F, M, 
+            return F, M
 
 
         def CopyStateOut(self, context, output):
@@ -403,11 +417,12 @@ class FixedWingGeometry(LeafSystem):
         X_Ble = RigidTransform(R_Ble, p_Ble)
         
               
-        left_motor_pose = X_DrB @ X_Blm @ RigidTransform(RotationMatrix.MakeZRotation(-full_state.delta_lm))
-        right_motor_pose = X_DrB @ X_Brm @ RigidTransform(RotationMatrix.MakeZRotation(full_state.delta_rm))
-        
-        left_elevon_pose = X_DrB @ X_Ble @ RigidTransform(RotationMatrix.MakeYRotation(full_state.delta_le))
-        right_elevon_pose = X_DrB @ X_Bre @ RigidTransform(RotationMatrix.MakeYRotation(full_state.delta_re))
+        scale = 40
+        left_motor_pose = X_DrB @ X_Blm @ RigidTransform(RotationMatrix.MakeZRotation(-full_state.delta_lm* scale))
+        right_motor_pose = X_DrB @ X_Brm @ RigidTransform(RotationMatrix.MakeZRotation(full_state.delta_rm* scale))
+    
+        left_elevon_pose = X_DrB @ X_Ble @ RigidTransform(RotationMatrix.MakeYRotation(full_state.delta_le ))
+        right_elevon_pose = X_DrB @ X_Bre @ RigidTransform(RotationMatrix.MakeYRotation(full_state.delta_re ))
         
 
         poses.get_mutable_value().set_value(self.body_frame_id, body_pose)
@@ -487,6 +502,7 @@ def coeffLf(alpha_rad):
         print("Error in coeffLf: ", e)
         coeffL = 0
     
+    # print(f"coeffL: {coeffL}")
     return coeffL
 
 # def Ry(theta):

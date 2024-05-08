@@ -138,7 +138,7 @@ class IrisWrapper:
                 
                 
                 t = time.perf_counter()
-                print(f"Region {len(self.iris_regions): .1f} computed in {t - temp_time} seconds\n")
+                print(f"Region {len(self.iris_regions): .1f}/{self.num_regions} computed in {t - temp_time} seconds\n")
                 temp_time = t
                 
         
@@ -269,7 +269,7 @@ class IrisWrapper:
             if iter>max_iter:
                 print("Max iterations reached")
                 
-            print(f"Chosen point_({i}/{N}): {sample}")
+            print(f"Chosen point_({i+1}/{N}): {sample}")
             
         return np.array(samples)
     
