@@ -4,10 +4,6 @@ import GcsTrajectoryUtils as gcsUtils
 
 import numpy as np
 
-
-import time
-
-
 scenery = 2
 
 if scenery == 0:
