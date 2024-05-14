@@ -28,6 +28,8 @@ from pydrake.multibody.parsing import Parser
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.systems.primitives import ConstantVectorSource
 from pydrake.systems.controllers import FiniteHorizonLinearQuadraticRegulatorOptions, MakeFiniteHorizonLinearQuadraticRegulator
+from pydrake.systems.sensors import CameraInfo, RgbdSensor
+
 # from underactuated import ConfigureParser
 
 from pydrake.examples import QuadrotorPlant, QuadrotorGeometry, StabilizingLQRController
@@ -40,9 +42,12 @@ from pydrake.all import (
     Simulator,
     BodyIndex, 
     ModelInstanceIndex,
+    LogVectorOutput,
+    RigidTransform
 )
 
 
+from matplotlib import pyplot as plt
 
 from IPython.display import SVG, display
 import pydot
@@ -54,6 +59,8 @@ import FlatnessInverter as fi
 import GeometryUtils as geoUtils
 import gcs
 import gcs.bezier
+
+
 
 
 FIXED_WING = 0
@@ -126,9 +133,57 @@ class SimulationEnvironment():
             self.fixed_plane = self.builder.AddSystem(fw.FixedWingPlant())
             fw.FixedWingGeometry.AddToBuilder(self.builder, self.fixed_plane.GetOutputPort("full_state"), self.scene_graph)
             self.fixed_plane.set_name("fixed_wing")
+            
+            self.logger_state = LogVectorOutput(self.fixed_plane.GetOutputPort("full_state"), self.builder)
+            self.logger_force = LogVectorOutput(self.fixed_plane.GetOutputPort("spatial_force"), self.builder)
+
             return
         
         raise ValueError("Invalid plant type")
+    
+    def AddRgbdSensor(self, plant, builder, X_PC,
+                      depth_camera=None,
+                      renderer=None,
+                      parent_frame_id=None):
+        
+        # if sys.platform == "linux" and os.getenv("DISPLAY") is None:
+        #     from pyvirtualdisplay import Display
+
+        #     virtual_display = Display(visible=0, size=(1400, 900))
+        #     virtual_display.staz()
+
+        if not renderer:
+            renderer = "my_renderer"
+
+        if not parent_frame_id:
+            parent_frame_id = self.scene_graph.world_frame_id()
+            print("Parent frame id used for camera: World_frame_id -", parent_frame_id)
+
+        if not self.scene_graph.HasRenderer(renderer):
+            self.scene_graph.AddRenderer(
+                renderer, pyGeo.MakeRenderEngineVtk(pyGeo.RenderEngineVtkParams())
+            )
+
+        if not depth_camera:
+            depth_camera = pyGeo.DepthRenderCamera(
+                pyGeo.RenderCameraCore(
+                    renderer,
+                    CameraInfo(width=640, height=480, fov_y=np.pi / 4.0),
+                    pyGeo.ClippingRange(near=0.1, far=10.0),
+                    RigidTransform(),
+                ),
+                pyGeo.DepthRange(0.1, 10.0),
+            )
+
+        rgbd = builder.AddSystem(
+            RgbdSensor(
+                parent_id=parent_frame_id,
+                X_PB=X_PC,
+                depth_camera=depth_camera,
+                show_window=False,
+            )
+        )
+            
     
     
     def add_constant_inputSource(self, value):
@@ -137,7 +192,7 @@ class SimulationEnvironment():
             self.builder.Connect(vsource.get_output_port(), self.fixed_plane.get_input_port(0))
             
     
-    def add_controller(self, point=None):
+    def add_controller(self, x_traj=None, u_traj=None, Q=None, R=None,Qf=None, point=None):
         
         if PLANT_TYPE == QUADROTOR:
             if point is None:
@@ -186,7 +241,35 @@ class SimulationEnvironment():
             return
             
         elif PLANT_TYPE == FIXED_WING:
+            if x_traj==None or u_traj==None:
+                raise ValueError("Missing x or u trajectory")
+            
+            options = FiniteHorizonLinearQuadraticRegulatorOptions()
+            options.Qf = Qf
+            # options.use_square_root_method = True  # Pending drake PR #16812
+            options.x0 = x_traj
+            options.u0 = u_traj
+
+            controller = self.builder.AddSystem(
+                MakeFiniteHorizonLinearQuadraticRegulator(
+                    system=self.fixed_plane,
+                    context=self.fixed_plane.CreateDefaultContext(),
+                    t0=x_traj.start_time(),
+                    tf=x_traj.end_time(),
+                    Q=Q,
+                    R=R,
+                    options=options,
+                )
+            )
+            self.builder.Connect(controller.get_output_port(), self.fixed_plane.get_input_port())
+            self.builder.Connect(self.fixed_plane.GetOutputPort("full_state"), controller.get_input_port())
+            
+            
+            
             return
+        
+        
+        
         
         raise ValueError("Invalid plant type")
         
@@ -226,7 +309,8 @@ class SimulationEnvironment():
         
         
         ## force publish to meshcat
-        self.diagram.ForcedPublish(self.diagram.CreateDefaultContext())
+        c = self.diagram.CreateDefaultContext()
+        self.diagram.ForcedPublish(c)
         return 
     
     # def view_model(self, urdf_obstacle):
@@ -257,7 +341,7 @@ class SimulationEnvironment():
         
     
      
-    def simulate(self, time=5, trajectory=None):
+    def simulate(self, time=5, trajectory=None, POV_ENABLED=True):
         simulator = Simulator(self.diagram)
         simulator.set_target_realtime_rate(1.0)
         simulator_context = simulator.get_mutable_context()
@@ -306,8 +390,9 @@ class SimulationEnvironment():
             perching_plane_context = self.diagram.GetMutableSubsystemContext(self.fixed_plane, simulator_context)
             if trajectory is None:
                 raise ValueError("Trajectory is required for fixed wing simulation")
-
-            num_timesteps = 200
+            
+            
+            num_timesteps = 1500
             num_dofs = 3
             p_numeric = np.empty((num_timesteps, num_dofs))
             dp_numeric = np.empty((num_timesteps, num_dofs))
@@ -352,38 +437,102 @@ class SimulationEnvironment():
             m = 1.54
             g = 9.80665
             
-            self.meshcat.StartRecording()
-
-            trajectory_frames = []
-            for p, dp, ddp, dddp, ddddp, t in zip(
-                p_numeric,
-                dp_numeric,
-                ddp_numeric,
-                dddp_numeric,
-                ddddp_numeric,
-                sample_times_s
-            ):
-                NUM_FULL_STATE = 16
-                fullState = fw.FullState(np.zeros(NUM_FULL_STATE))
-                stateNED = fi.UnflattenFixedWingStatesNED(p, dp, ddp, dddp, ddddp, m, g)
-                fullState[:12] = stateNED
+            
+            keep_looping = True
+            
+            
+            def muFromfullStateAhead(n, ahead=15):
+                if (n+ahead) >= len(p_numeric):
+                    step = -1
+                else:
+                    step = n+ahead 
                 
-                X_DrB = fi.ExtractTransformation(stateNED)
-                trajectory_frames.append(X_DrB)                
+                p = np.array(p_numeric[step, :])
+                dp = np.array(dp_numeric[step, :])
+                ddp = np.array(ddp_numeric[step, :])
+                dddp = np.array(dddp_numeric[step, :])
+                ddddp = np.array(ddddp_numeric[step, :])
+                
+               
+                stateNED_ahead = fi.UnflattenFixedWingStatesNED(p, dp, ddp, dddp, ddddp, m, g)
+                
+                return fi.FixedWingStatesNED(stateNED_ahead).mu
+            
+            
+            while keep_looping:
+            
+                simulator_context.SetTime(sample_times_s[0])
+                simulator.Initialize()
+                self.meshcat.StartRecording()
 
-                simulator_context.SetContinuousState(fullState[:])
-                simulator.AdvanceTo(t)
+                trajectory_frames = []
+                for i, (p, dp, ddp, dddp, ddddp, t) in enumerate(zip(
+                    p_numeric,
+                    dp_numeric,
+                    ddp_numeric,
+                    dddp_numeric,
+                    ddddp_numeric,
+                    sample_times_s
+                )):
+                    NUM_FULL_STATE = 16
+                    fullState = fw.FullState(np.zeros(NUM_FULL_STATE))
+                    stateNED = fi.UnflattenFixedWingStatesNED(p, dp, ddp, dddp, ddddp, m, g)
+                    fullState[:12] = stateNED
+                    
+                    X_DrB = fi.ExtractTransformation(stateNED)
+                    
+                    
+                    if POV_ENABLED:
+                        R_DrB = X_DrB.rotation()
+                        pos_B = X_DrB.translation()
+                        camera_pos_B = pos_B + R_DrB @ np.array([-1, 0, -.2])
+                        self.meshcat.SetCameraPose(camera_pos_B, pos_B)
 
-            geoUtils.visualize_key_frames(self.meshcat, trajectory_frames)
+                    
+                    mu = muFromfullStateAhead(i, ahead=30)
+                    # Set some values for simulation
+                    fullState.delta_le = np.clip(mu, -0.8, 0.8)
+                    fullState.delta_re = np.clip(-mu, -0.8, 0.8)
+                    fullState.delta_lm = 1.5*t
+                    fullState.delta_rm = 1.5*t
+                    
+                    
+                    trajectory_frames.append(X_DrB)                
 
-            self.meshcat.StopRecording()
-            self.meshcat.PublishRecording()
+                    simulator_context.SetContinuousState(fullState[:])
+                    simulator.AdvanceTo(t)
+
+                geoUtils.visualize_key_frames(self.meshcat, trajectory_frames)
+
+                self.meshcat.StopRecording()
+                self.meshcat.PublishRecording()
+                
+                if POV_ENABLED and replay_requested_from_user():
+                    keep_looping = True
+                    simulator.set_target_realtime_rate(1.0)
+                    
+                else:                 
+                    keep_looping = False
             
             return
             
             
         
         raise ValueError("Invalid plant type")
+
+
+
+def replay_requested_from_user():
+    #ask user if we want to loop again
+    while True:
+        ans = input("Do you want to loop again? (y/n): ")
+        if ans.lower() == 'y':
+            return True
+        elif ans.lower() == 'n':
+            return False
+        else:
+            print("Invalid input")
+            continue
 
 
 ######################## PLANT UTILS ############################

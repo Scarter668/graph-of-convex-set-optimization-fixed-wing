@@ -96,37 +96,42 @@ class IrisWrapper:
         start_time = time.perf_counter()
         temp_time = start_time
 
+        self.iris_regions = []
+        
         
         if self.use_CliqueCover:
             
-            self.samples = self.find_NSamplePoints(self.num_points)
-            print(f"\nComputing minimal clique partition with {self.num_points} points\n")
-            
-            adj_mat = isc.vgraph(self.samples, self.iris_obstacles)
-            self.cliques = isc.compute_minimal_clique_partition_nx(adj_mat)
-            
-            print("\nCalculating ellipsoids for cliques\n")
-            cliquepts = [self.samples[cl] for cl in self.cliques]
-            ells = []
-            for clpt in cliquepts:
-                try:
-                    ells.append(pyOpt.Hyperellipsoid.MinimumVolumeCircumscribedEllipsoid(clpt.T))
+            print(f"\nComputing minimal clique partition with {self.num_points} points 2 times\n")
+            for _ in range(2):
+                self.samples = self.find_NSamplePoints(self.num_points)
                 
-                except Exception as e:
-                    print(f"Failed to compute ellipsoid for clique {clpt}")
-                    print(f"Error: {e}")
-                    continue    
-            
-            print("\nSolving IRIS regions\n")
-            self.iris_regions = []
-            for e in ells:
-                seed = e.center()
-                options.require_sample_point_is_contained = True
-                options.starting_ellipse = e
-                # options.random_seed = seed
+                adj_mat = isc.vgraph(self.samples, self.iris_obstacles)
+                self.cliques = isc.compute_minimal_clique_partition_nx(adj_mat)
                 
-                r = pyOpt.Iris(iris_obstacles_scaled, seed, self.domain, options)
-                self.iris_regions.append(r)
+                print("\nCalculating ellipsoids for cliques\n")
+                cliquepts = [self.samples[cl] for cl in self.cliques]
+                ells = []
+                
+                for clpt in cliquepts:
+                    try:
+                        ells.append(pyOpt.Hyperellipsoid.MinimumVolumeCircumscribedEllipsoid(clpt.T))
+                    
+                    except Exception as e:
+                        print(f"Failed to compute ellipsoid for clique {clpt}")
+                        print(f"Error: {e}")
+                        continue    
+                
+                print("\nSolving IRIS regions\n")
+                for e in ells:
+                    seed = e.center()
+                    options.require_sample_point_is_contained = True
+                    options.starting_ellipse = e
+                    # options.random_seed = seed
+                    
+                    r = pyOpt.Iris(iris_obstacles_scaled, seed, self.domain, options)
+                    self.iris_regions.append(r)
+                print("\n Done")
+                self.num_regions = len(self.iris_regions)
     
         else:       
             
@@ -179,9 +184,9 @@ class IrisWrapper:
             if (self.samples is None) or (self.cliques is None):
                 raise ValueError("None sample or clique type")
 
-            isc.plot_points(meshcat, self.samples, "sample_points", visible=False)
+            isc.plot_points(meshcat, self.samples, "sample_points", visible=True)
             
-            isc.plot_cliques(meshcat, self.cliques, self.samples, "cliques", visible=False)
+            isc.plot_cliques(meshcat, self.cliques, self.samples, "cliques", visible=True)
         
         
         i=0
@@ -250,26 +255,51 @@ class IrisWrapper:
         def in_collision(point):
             return any(vp.PointInSet(point) for vp in vp_obst)
 
-        samples = []
-        prevSample = None
-        for i in range(N):
-            sample = None
-            if prevSample:
-                sample = self.domain.UniformSample(self.randomGen,previous_sample=sample)
-            else:
-                sample = self.domain.UniformSample(self.randomGen)
+        # samples = []
+        # prevSample = None
+        # for i in range(N):
+        #     sample = None
+        #     if prevSample:
+        #         sample = self.domain.UniformSample(self.randomGen,previous_sample=sample)
+        #     else:
+        #         sample = self.domain.UniformSample(self.randomGen)
 
-            iter = 0
-            while in_collision(sample) and iter<=max_iter:
-                sample = self.domain.UniformSample(self.randomGen,previous_sample=sample)
-                iter += 1
+        #     iter = 0
+        #     while in_collision(sample) and iter<=max_iter:
+        #         sample = self.domain.UniformSample(self.randomGen,previous_sample=sample)
+        #         iter += 1
             
-            samples.append(sample)
+        #     samples.append(sample)
+            
+        #     if iter>max_iter:
+        #         print("Max iterations reached")
+                
+        #     print(f"Chosen point_({i+1}/{N}): {sample}")
+            
+        
+        samples = []
+        iter = 0
+        i=0
+        while len(samples) < N and iter<=max_iter:
+            # Generate random point within bounds
+            point = np.array([
+                np.random.uniform(self.lower_bound[0], self.upper_bound[0]),
+                np.random.uniform(self.lower_bound[1], self.upper_bound[1]),
+                np.random.uniform(self.lower_bound[2], self.upper_bound[2])
+            ])
+
+            # Check collision and add to result if not in collision
+            iter += 1
+            if in_collision(point):
+                continue
             
             if iter>max_iter:
                 print("Max iterations reached")
                 
-            print(f"Chosen point_({i+1}/{N}): {sample}")
+            iter = 0
+            samples.append(point)
+            i+=1
+            print(f"Chosen point_({i}/{N}): {point}")
             
         return np.array(samples)
     
@@ -280,7 +310,7 @@ class IrisWrapper:
         if self.use_CliqueCover:
             
             try:
-                path = self.region_file_path+"_clique.pkl"
+                path = f"{self.region_file_path}_numRegs{self.num_regions}_clique.pkl"
                 with open(path, 'wb') as f:
                     pickle.dump((self.iris_regions, self.samples, self.cliques), f)
                 
@@ -293,7 +323,7 @@ class IrisWrapper:
         else:
             
             try:
-                path = self.region_file_path+".pkl"
+                path = f"{self.region_file_path}_numRegs{self.num_regions}.pkl"
                 with open(path, 'wb') as f:
                     pickle.dump(self.iris_regions, f)
                 
@@ -314,7 +344,8 @@ class IrisWrapper:
             samples = None
             cliques = None
             try:
-                path = self.region_file_path+"_clique.pkl"
+                path = f"{self.region_file_path}_numRegs{self.num_regions}_clique.pkl"
+                # path= f"{self.region_file_path}.pkl"
                 with open(path, 'rb') as f:
                     reg, samples, cliques = pickle.load(f)
             
@@ -329,7 +360,7 @@ class IrisWrapper:
                 return None
         else:
             try:
-                path = self.region_file_path+".pkl"
+                path = f"{self.region_file_path}_numRegs{self.num_regions}.pkl"
                 with open(path, 'rb') as f:
                     reg = pickle.load(f)
                     

@@ -8,9 +8,9 @@ import numpy as np
 import time
 
 
-obstacle = 2
+scenery = 2
 
-if obstacle == 0:
+if scenery == 0:
     PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation.urdf"
 
     # width of ground, lenght of ground,height of highest obstavle + 1. Look in urdf file
@@ -18,7 +18,7 @@ if obstacle == 0:
     GROUND_WIDTH = 7
     GROUND_LENGTH = 15
     OBST_HEIGHT = 3
-elif obstacle == 1:
+elif scenery == 1: # Simple environment
     
     PATH_TO_OBSTACLE_ENV = "models/obstacles_house_formation_Large.urdf"
     # width of ground, lenght of ground,height of highest obstavle + 1. Look in urdf file
@@ -27,7 +27,7 @@ elif obstacle == 1:
     GROUND_LENGTH = 20
     OBST_HEIGHT = 2
 
-elif obstacle == 2:
+elif scenery == 2: #Complex environment
     PATH_TO_OBSTACLE_ENV = "models/obstacles.urdf"
     CENTER_GROUND_XY = np.array([0, 9]) 
     GROUND_WIDTH = 11
@@ -38,11 +38,11 @@ PLANE_WIDTH = 1
 
 # trajectory
 KDIMENTIONS = 3
-VEL_LOWER_BOUND = np.ones(KDIMENTIONS) * -.8
-VEL_UPPER_BOUND =  np.ones(KDIMENTIONS) * .8 #np.array([100000, 100000, 100000])
+VEL_LOWER_BOUND = np.ones(KDIMENTIONS) * -5
+VEL_UPPER_BOUND =  np.ones(KDIMENTIONS) * 5 #np.array([100000, 100000, 100000])
 
-START_VELOCITY_LB = np.array([0.8, 0.8, 0.1])
-# START_VELOCITY_LB = np.array([-0.8, -0.4, -0.01])
+START_VELOCITY_LB = np.ones(KDIMENTIONS)* 0.5
+# START_VELOCITY_LB = VEL_LOWER_BOUND
 GOAL_VELOCITY_LB = VEL_LOWER_BOUND #np.array([-0.1, 0.2, -0.1])
 
 
@@ -50,8 +50,6 @@ GOAL_VELOCITY_LB = VEL_LOWER_BOUND #np.array([-0.1, 0.2, -0.1])
 
 
 if __name__ == "__main__":
-    
-    
     
     
     print("################ Building environment model ################\n")
@@ -67,16 +65,19 @@ if __name__ == "__main__":
 
     print("################ Starting IRIS region computation ################\n")
     irisOptions = irisUtils.IrisWrapperOptions()
-    irisOptions.use_CliqueCover = False
-    irisOptions.clique_num_points = 500
+    irisOptions.use_CliqueCover = True
+    irisOptions.clique_num_points = 100
     irisOptions.obstacle_offset_factor = 0.2 # PLANE_WIDTH/2.0
     irisOptions.seed = 0
+    irisOptions.num_regions = 15
     if irisOptions.use_CliqueCover:
-        irisOptions.region_file_path = f"region_files/iris_regions_obst_p{irisOptions.clique_num_points}"
-    else:
-        irisOptions.region_file_path = f"region_files/iris_regions_obst_NOCLIQUE"
-    irisOptions.num_regions = 20
+        # irisOptions.region_file_path = f" region_files/iris_regions_Large"
+        # irisOptions.region_file_path = f"region_files/iris_regions_Large_p{irisOptions.clique_num_points}"
+        irisOptions.region_file_path = f"region_files/cliques/regions_scenery{scenery}_p{irisOptions.clique_num_points}"
+        # irisOptions.region_file_path = "region_files/iris_regions_clique"   
     
+    else:
+        irisOptions.region_file_path = f"region_files/random/regions_scenery{scenery}"
     irisWrapper = irisUtils.IrisWrapper(irisOptions)    
     simEnv.compute_obstacles(irisWrapper)
     irisWrapper.determine_and_set_domain(CENTER_GROUND_XY, GROUND_WIDTH, GROUND_LENGTH, OBST_HEIGHT)    
@@ -99,42 +100,49 @@ if __name__ == "__main__":
     
 
     
-    input("Press Enter to continue...")
+    input("Press Enter to continue...\n")
     
     print("################ Solving GCS trajectory ################\n")
     options = gcsUtils.GCSTrajectoryOptions()
     options.use_BezierGCS = False
     options.regions = irisWrapper.iris_regions
     options.path_continuity_order = 4 # 3 works for Bezier
-    options.Bspline_order = 5   # 4 works for Bezier
+    options.Bspline_order = 7   # 4 works for Bezier
     # options.edges = None
 
     options.start_velocity_lb = START_VELOCITY_LB
     options.goal_velocity_lb = GOAL_VELOCITY_LB
 
 
+
+
     options.hdot_min = 1e-3
     options.full_dim_overlap = True
-    options.traj_file_path = 'trajectory_files/trajectory'
-    options.derivative_regularization = 1e-3
+    if irisOptions.use_CliqueCover:
+        options.traj_file_path = f'trajectory_files/cliques/traj_scenery{scenery}_p{irisOptions.clique_num_points}_numRegs{irisOptions.num_regions}'
+    else:
+        options.traj_file_path = f'trajectory_files/random/traj_scenery{scenery}_numRegs{irisOptions.num_regions}'
+        
+
+    options.derivative_regularization = 1e-3 
     
     gcsTraj = gcsUtils.GCSTrajectory(KDIMENTIONS, options)
     start = [0, 0, 1]
     goal1 = [0.5, 11.5, 1.5]
     goal2 = [0, 10.5, 1.5]
-    goal3 = [0.5, 17.5, 1]
+    goal3 = [0, 17.5, 1.2]
     goal4 = [-2, 6.5, 1.5]
     goal5 = [-3, 12, 0.5]
     goal6 = [-3, 17.5, 1.2]
     goal7 = [4.5, 17.5, .5]
     
     goal8 = [3.5, 18.5, .5]
-    goal =  goal8
+    goal =  goal6
     
         
     gcsTraj.add_start_goal_and_viz(start, goal, simEnv.meshcat, zero_deriv_boundary=None)
-    gcsTraj.add_pathLengthCost(1000)
-    gcsTraj.add_timeCost(10)
+    gcsTraj.add_pathLengthCost(10)
+    gcsTraj.add_timeCost(1000)
     gcsTraj.add_velocityBounds(VEL_LOWER_BOUND, VEL_UPPER_BOUND)
     gcsTraj.add_continuityContraint()
     
@@ -158,7 +166,7 @@ if __name__ == "__main__":
     simulator = sim.SimulationEnvironment(PATH_TO_OBSTACLE_ENV)
     simulator.connect_meshcat()
     simulator.add_fixed_wing()
-    simulator.add_controller(gcsTraj.trajectory.value(6))
+    # simulator.add_controller(gcsTraj.trajectory.value(6))
     simulator.add_constant_inputSource([0,0,0,0])
     simulator.build_model()
     simulator.save_and_display_diagram()
@@ -188,3 +196,5 @@ if __name__ == "__main__":
     
     
     input("Press Enter to quit...")
+    
+    

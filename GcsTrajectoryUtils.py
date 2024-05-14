@@ -11,6 +11,8 @@ from pydrake.solvers import MosekSolver
 import gcs.bezier as gcb
 import pickle
 
+# from pydrake.all import GurobiSolver
+from pydrake.trajectories import CompositeTrajectory
 
 
 TRAJECTORY_FILE_PATH = "trajectory.pkl"
@@ -64,20 +66,24 @@ class GCSTrajectory():
     def __init__(self, kdimentions = 3, options = GCSTrajectoryOptions()):
         self.kdixmentions = kdimentions
         
+        if not options.is_defined():
+            raise ValueError("Options are not defined when using Bezier/GCS")
+        
         self.USE_BEZIER = options.use_BezierGCS
         self.traj_file_path = options.traj_file_path
         
         self.path_continuity_order = options.path_continuity_order
         self.Bspline_order = options.Bspline_order
         self.regions = options.regions
+        self.num_regions = len(self.regions)
+        
         self.derivative_regularization = options.derivative_regularization
         
         
         self.start_velocity_lb = options.start_velocity_lb
         self.goal_velocity_lb = options.goal_velocity_lb
         
-        if not options.is_defined():
-            raise ValueError("Options are not defined when using Bezier/GCS")
+        
         
         if self.USE_BEZIER:
             self.gcsTrajOpt = gcb.BezierGCS(regions=options.regions, 
@@ -99,8 +105,8 @@ class GCSTrajectory():
         if self.USE_BEZIER:
             self.gcsTrajOpt.addSourceTarget(start, goal, velocity=None , zero_deriv_boundary=1)
         else:
-            self.source = self.gcsTrajOpt.AddRegions([pyOpt.Point(start)], order=0) # 1 control point
-            self.target = self.gcsTrajOpt.AddRegions([pyOpt.Point(goal)], order=0)
+            self.source = self.gcsTrajOpt.AddRegions([pyOpt.Point(start)], order=0, h_max=1) # 1 control point
+            self.target = self.gcsTrajOpt.AddRegions([pyOpt.Point(goal)], order=0, h_max=1)
         
         self.visualize_start_goal(start, goal, meshcat, is_visible)
         return
@@ -131,7 +137,8 @@ class GCSTrajectory():
     def add_regions(self):
         if not self.USE_BEZIER:
             # regions: list of HPolyhedron's
-            self.regions = self.gcsTrajOpt.AddRegions(self.regions, self.Bspline_order, h_min=1e-3)
+            
+            self.regions = self.gcsTrajOpt.AddRegions(self.regions, self.Bspline_order, h_min=1e-3, h_max=10)
             return
         raise ValueError("add_regions are not supported for Bezier GCS")
     
@@ -228,6 +235,7 @@ class GCSTrajectory():
     
     def solve(self, preprocessing=True):
         
+        print("Solving GCS trajectory")
         if not self.USE_BEZIER:
             self.connect_graph()
         
@@ -239,22 +247,28 @@ class GCSTrajectory():
         if self.USE_BEZIER:
             self.gcsTrajOpt.setPaperSolverOptions()
             self.gcsTrajOpt.setSolver(MosekSolver())
+            # self.gcsTrajOpt.setSolver(GurobiSolver())
             trajectory = self.gcsTrajOpt.SolvePath(rounding=True, verbose=False, preprocessing=preprocessing)[0]
             
             success = True
         else:
             options = pyOpt.GraphOfConvexSetsOptions()
-            options.max_rounding_trials = 10000
+            options.max_rounding_trials = 50000
             options.max_rounded_paths = 5000
             options.solver = MosekSolver()
+            # options.solver = GurobiSolver()
             options.convex_relaxation = True
             trajectory, result = self.gcsTrajOpt.SolvePath(self.source, self.target, options=options)
             success = result.is_success()
+                
+            print(result.get_solution_result())
         
         end_time = time.perf_counter()
         
         time_elapsed = end_time - start_time
         if not success:
+            
+            print()
             raise ValueError(f"Failed to find a solution after {time_elapsed: .1f} seconds")
         else:
             print(f"Solution found after {time_elapsed: .1f} seconds")
@@ -281,7 +295,8 @@ class GCSTrajectory():
             point = self.trajectory.value(t)
             geoUtils.visualize_point(meshcat,
                                      point,
-                                     label=f"Gcs/trajetory/point_{t: .1f}")
+                                     label=f"Gcs/trajetory/point_{t: .1f}",
+                                     radius=0.01)
         return
          
     def load_trajectory_from_file(self):
@@ -291,7 +306,8 @@ class GCSTrajectory():
         
         if self.USE_BEZIER:
             try:
-                path = self.traj_file_path+"_BezierGCS.pkl"
+                path = f"{self.traj_file_path}_BezierGCS.pkl"
+
                 with open(path, 'rb') as f:
                     traj = pickle.load(f)
             
@@ -304,7 +320,7 @@ class GCSTrajectory():
         else:
 
             try:
-                path = self.traj_file_path+".pkl"
+                path = f"{self.traj_file_path}.pkl"
                 with open(path, 'rb') as f:
                     traj = pickle.load(f)
             
@@ -321,13 +337,14 @@ class GCSTrajectory():
     def save_trajectory_to_file(self):
         
         print("\n\nSaving trajectory to file")
+    
         if self.trajectory is None:
             print("Trajectory is not defined")
             return False
 
         if self.USE_BEZIER:
             try:
-                path = self.traj_file_path+"_BezierGCS.pkl"
+                path = f"{self.traj_file_path}_numRegs{self.num_regions}_BezierGCS.pkl"
                 with open(path, 'wb') as f:
                     pickle.dump((self.trajectory), f)
                 print(f"Trajectory saved to {path}")
@@ -341,7 +358,7 @@ class GCSTrajectory():
         
         else:
             print("Saving non Bezier trajectory to file")
-            path = self.traj_file_path+".pkl"   
+            path = f"{self.traj_file_path}_numRegs{self.num_regions}.pkl"  
             try:
                 with open(path, 'wb') as f:
                     pickle.dump((self.trajectory), f)

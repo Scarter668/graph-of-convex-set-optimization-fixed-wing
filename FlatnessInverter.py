@@ -280,11 +280,11 @@ def Extract_R_OA(statesNed):
     
     return R_OA
 
-def Extract_R_OB(statesNed):
+def Extract_R_OB(statesNED):
     
-    R_OA = Extract_R_OA(statesNed)
+    R_OA = Extract_R_OA(statesNED)
     
-    R_BA = Extract_R_BA(statesNed)
+    R_BA = Extract_R_BA(statesNED)
     
     R_OB = R_OA @ R_BA.transpose()
     

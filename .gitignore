@@ -2,8 +2,10 @@ example_models/*
 
 *.pkl
 *.svg
-*.ipynb
+*.mp4
+
 
 __pycache__/*
 
 **_files
+
